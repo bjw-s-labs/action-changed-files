@@ -35405,7 +35405,7 @@ async function run() {
         console.log('Changed files:');
         changedFiles.forEach((file) => console.log(`- ${file}`));
         // Set outputs for other workflow steps to use
-        coreExports.setOutput('changed_files', changedFiles);
+        coreExports.setOutput('changed_files', JSON.stringify(changedFiles));
     }
     catch (error) {
         // Fail the workflow run if an error occurs
