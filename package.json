@@ -1,0 +1,64 @@
+{
+  "name": "action-changed-files",
+  "description": "GitHub Action to return changed files",
+  "version": "0.1.0",
+  "author": "",
+  "type": "module",
+  "private": true,
+  "homepage": "https://github.com/bjw-s-labs/action-changed-files",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bjw-s-labs/action-changed-files.git"
+  },
+  "bugs": {
+    "url": "https://github.com/bjw-s-labs/action-changed-files/issues"
+  },
+  "keywords": [
+    "actions"
+  ],
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "bundle": "npm run format:write && npm run package",
+    "ci-test": "NODE_OPTIONS=--experimental-vm-modules NODE_NO_WARNINGS=1 npx jest --passWithNoTests",
+    "coverage": "npx make-coverage-badge --output-path ./badges/coverage.svg",
+    "format:write": "npx prettier --write .",
+    "format:check": "npx prettier --check .",
+    "lint": "npx eslint .",
+    "local-action": "npx @github/local-action . src/main.ts .env",
+    "package": "npx rollup --config rollup.config.ts --configPlugin @rollup/plugin-typescript",
+    "package:watch": "npm run package -- --watch",
+    "test": "NODE_OPTIONS=--experimental-vm-modules NODE_NO_WARNINGS=1 npx jest",
+    "all": "npm run format:write && npm run lint && npm run test && npm run coverage && npm run package"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@actions/core": "1.11.1",
+    "@actions/github": "6.0.0"
+  },
+  "devDependencies": {
+    "@eslint/compat": "1.2.7",
+    "@github/local-action": "3.1.1",
+    "@rollup/plugin-commonjs": "28.0.3",
+    "@rollup/plugin-node-resolve": "16.0.1",
+    "@rollup/plugin-typescript": "12.1.2",
+    "@typescript-eslint/eslint-plugin": "8.26.1",
+    "eslint": "9.22.0",
+    "eslint-config-prettier": "10.0.2",
+    "eslint-plugin-import": "2.31.0",
+    "eslint-plugin-jest": "28.11.0",
+    "eslint-plugin-prettier": "5.2.3",
+    "jest": "29.7.0",
+    "prettier": "3.5.3",
+    "rollup": "4.35.0",
+    "ts-jest": "29.2.6",
+    "ts-jest-resolver": "2.0.1"
+  },
+  "optionalDependencies": {
+    "@rollup/rollup-linux-x64-gnu": "*"
+  }
+}

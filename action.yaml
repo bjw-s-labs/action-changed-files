@@ -1,0 +1,29 @@
+---
+name: 'Get changed files'
+description: 'Get the changed files in a pull request or other event'
+author: bjw-s-labs
+
+# Add your action's branding here. This will appear on the GitHub Marketplace.
+branding:
+  icon: heart
+  color: red
+
+# Define your inputs here.
+inputs:
+  matchers:
+    description: 'Regexes to match the files against'
+    required: true
+    default: '.*'
+  token:
+    description: 'GitHub token'
+    default: ${{ github.token }}
+    required: false
+
+# Define your outputs here.
+outputs:
+  changed_files:
+    description: JSON array of changed files
+
+runs:
+  using: node20
+  main: dist/index.js
