@@ -11,7 +11,7 @@ export async function run(): Promise<void> {
   try {
     const githubToken = core.getInput('token')
     const patterns = core.getInput('patterns')
-    const splitPatterns = patterns.split('\n')
+    const splitPatterns = patterns.split('\n').filter((v) => v !== '')
     const octokit = github.getOctokit(githubToken)
 
     let changedFiles: Array<string> = []

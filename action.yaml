@@ -12,7 +12,7 @@ branding:
 inputs:
   patterns:
     description: 'Glob patterns to match the files against'
-    required: true
+    required: false
     default: ''
   token:
     description: 'GitHub token'

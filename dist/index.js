@@ -35365,7 +35365,7 @@ async function run() {
     try {
         const githubToken = coreExports.getInput('token');
         const patterns = coreExports.getInput('patterns');
-        const splitPatterns = patterns.split('\n');
+        const splitPatterns = patterns.split('\n').filter((v) => v !== '');
         const octokit = githubExports.getOctokit(githubToken);
         let changedFiles = [];
         const hasPatterns = splitPatterns.length > 0;

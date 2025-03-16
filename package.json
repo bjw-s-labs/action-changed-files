@@ -1,7 +1,7 @@
 {
   "name": "action-changed-files",
   "description": "GitHub Action to return changed files",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "author": "bjw-s-labs",
   "type": "module",
   "private": true,
