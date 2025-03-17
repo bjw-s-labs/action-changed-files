@@ -35365,17 +35365,21 @@ async function run() {
     try {
         const githubToken = coreExports.getInput('token');
         const patterns = coreExports.getInput('patterns');
+        const includeDeletedFiles = coreExports.getInput('include_deleted_files') === 'true';
         const splitPatterns = patterns.split('\n').filter((v) => v !== '');
         const octokit = githubExports.getOctokit(githubToken);
         let changedFiles = [];
         const hasPatterns = splitPatterns.length > 0;
         if (githubExports.context.eventName === 'pull_request') {
             if (githubExports.context.payload.pull_request) {
-                const { data: files } = await octokit.rest.pulls.listFiles({
+                let { data: files } = await octokit.rest.pulls.listFiles({
                     owner: githubExports.context.repo.owner,
                     repo: githubExports.context.repo.repo,
                     pull_number: githubExports.context.payload.pull_request.number
                 });
+                if (!includeDeletedFiles) {
+                    files = files.filter((file) => file.status !== 'removed');
+                }
                 if (hasPatterns) {
                     changedFiles = mm(files.map((file) => file.filename), splitPatterns);
                 }
@@ -35393,11 +35397,15 @@ async function run() {
                 base: githubExports.context.payload.before,
                 head: githubExports.context.payload.after
             });
-            if (hasPatterns && commits.files) {
-                changedFiles = mm(commits.files.map((file) => file.filename), splitPatterns);
+            let files = commits.files || [];
+            if (!includeDeletedFiles) {
+                files = files.filter((file) => file.status !== 'removed');
+            }
+            if (hasPatterns) {
+                changedFiles = mm(files.map((file) => file.filename), splitPatterns);
             }
             else {
-                commits.files
+                files
                     ?.map((file) => file.filename)
                     .forEach((file) => changedFiles.push(file));
             }

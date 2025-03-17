@@ -11,6 +11,8 @@ export async function run(): Promise<void> {
   try {
     const githubToken = core.getInput('token')
     const patterns = core.getInput('patterns')
+    const includeDeletedFiles =
+      core.getInput('include_deleted_files') === 'true'
     const splitPatterns = patterns.split('\n').filter((v) => v !== '')
     const octokit = github.getOctokit(githubToken)
 
@@ -19,11 +21,14 @@ export async function run(): Promise<void> {
 
     if (github.context.eventName === 'pull_request') {
       if (github.context.payload.pull_request) {
-        const { data: files } = await octokit.rest.pulls.listFiles({
+        let { data: files } = await octokit.rest.pulls.listFiles({
           owner: github.context.repo.owner,
           repo: github.context.repo.repo,
           pull_number: github.context.payload.pull_request.number
         })
+        if (!includeDeletedFiles) {
+          files = files.filter((file) => file.status !== 'removed')
+        }
         if (hasPatterns) {
           changedFiles = mm(
             files.map((file) => file.filename),
@@ -42,13 +47,17 @@ export async function run(): Promise<void> {
         base: github.context.payload.before,
         head: github.context.payload.after
       })
-      if (hasPatterns && commits.files) {
+      let files = commits.files || []
+      if (!includeDeletedFiles) {
+        files = files.filter((file) => file.status !== 'removed')
+      }
+      if (hasPatterns) {
         changedFiles = mm(
-          commits.files.map((file) => file.filename),
+          files.map((file) => file.filename),
           splitPatterns
         )
       } else {
-        commits.files
+        files
           ?.map((file) => file.filename)
           .forEach((file) => changedFiles.push(file))
       }
