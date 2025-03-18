@@ -10,12 +10,20 @@ branding:
 
 # Define your inputs here.
 inputs:
+  path:
+    description: 'Path to include in the result'
+    required: false
+    default: ''
   patterns:
     description: 'Glob patterns to match the files against'
     required: false
     default: ''
   include_deleted_files:
     description: 'Include deleted files in the result?'
+    required: false
+    default: 'false'
+  include_only_folders:
+    description: 'Include only folders with changes in the result?'
     required: false
     default: 'false'
   token:
