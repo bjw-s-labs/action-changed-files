@@ -1,6 +1,8 @@
 import * as github from '@actions/github'
 import * as core from '@actions/core'
-import mm from 'micromatch'
+
+import * as inputHelper from './inputs-helper.js'
+import { getChangedFiles } from './changes-helper.js'
 
 /**
  * The main function for the action.
@@ -9,60 +11,19 @@ import mm from 'micromatch'
  */
 export async function run(): Promise<void> {
   try {
-    const githubToken = core.getInput('token')
-    const patterns = core.getInput('patterns')
-    const includeDeletedFiles =
-      core.getInput('include_deleted_files') === 'true'
-    const splitPatterns = patterns.split('\n').filter((v) => v !== '')
-    const octokit = github.getOctokit(githubToken)
+    const inputs = await inputHelper.getInputs()
+    const octokit = github.getOctokit(inputs.githubToken)
 
-    let changedFiles: Array<string> = []
-    const hasPatterns = splitPatterns.length > 0
+    const changedFiles = await getChangedFiles(
+      octokit,
+      inputs.includeDeletedFiles,
+      inputs.includeOnlyDirectories,
+      inputs.searchPath,
+      inputs.maxDepth,
+      inputs.patterns
+    )
 
-    if (github.context.eventName === 'pull_request') {
-      if (github.context.payload.pull_request) {
-        let { data: files } = await octokit.rest.pulls.listFiles({
-          owner: github.context.repo.owner,
-          repo: github.context.repo.repo,
-          pull_number: github.context.payload.pull_request.number
-        })
-        if (!includeDeletedFiles) {
-          files = files.filter((file) => file.status !== 'removed')
-        }
-        if (hasPatterns) {
-          changedFiles = mm(
-            files.map((file) => file.filename),
-            splitPatterns
-          )
-        } else {
-          files
-            .map((file) => file.filename)
-            .forEach((file) => changedFiles.push(file))
-        }
-      }
-    } else {
-      const { data: commits } = await octokit.rest.repos.compareCommits({
-        owner: github.context.repo.owner,
-        repo: github.context.repo.repo,
-        base: github.context.payload.before,
-        head: github.context.payload.after
-      })
-      let files = commits.files || []
-      if (!includeDeletedFiles) {
-        files = files.filter((file) => file.status !== 'removed')
-      }
-      if (hasPatterns) {
-        changedFiles = mm(
-          files.map((file) => file.filename),
-          splitPatterns
-        )
-      } else {
-        files
-          ?.map((file) => file.filename)
-          .forEach((file) => changedFiles.push(file))
-      }
-    }
-    console.log('Changed files:')
+    console.log(`Changes:`)
     changedFiles.forEach((file) => console.log(`- ${file}`))
 
     // Set outputs for other workflow steps to use

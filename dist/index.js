@@ -24,7 +24,8 @@ import require$$3$2 from 'zlib';
 import require$$6 from 'string_decoder';
 import require$$0$8 from 'diagnostics_channel';
 import require$$0$9 from 'crypto';
-import require$$0$a from 'path';
+import * as path from 'path';
+import path__default from 'path';
 import require$$2$3 from 'child_process';
 import require$$6$1 from 'timers';
 
@@ -29489,7 +29490,7 @@ function requirePathUtils () {
 	};
 	Object.defineProperty(pathUtils, "__esModule", { value: true });
 	pathUtils.toPlatformPath = pathUtils.toWin32Path = pathUtils.toPosixPath = void 0;
-	const path = __importStar(require$$0$a);
+	const path = __importStar(path__default);
 	/**
 	 * toPosixPath converts the given path to the posix form. On Windows, \\ will be
 	 * replaced with /.
@@ -29576,7 +29577,7 @@ function requireIoUtil () {
 		Object.defineProperty(exports, "__esModule", { value: true });
 		exports.getCmdPath = exports.tryGetExecutablePath = exports.isRooted = exports.isDirectory = exports.exists = exports.READONLY = exports.UV_FS_O_EXLOCK = exports.IS_WINDOWS = exports.unlink = exports.symlink = exports.stat = exports.rmdir = exports.rm = exports.rename = exports.readlink = exports.readdir = exports.open = exports.mkdir = exports.lstat = exports.copyFile = exports.chmod = void 0;
 		const fs = __importStar(require$$1);
-		const path = __importStar(require$$0$a);
+		const path = __importStar(path__default);
 		_a = fs.promises
 		// export const {open} = 'fs'
 		, exports.chmod = _a.chmod, exports.copyFile = _a.copyFile, exports.lstat = _a.lstat, exports.mkdir = _a.mkdir, exports.open = _a.open, exports.readdir = _a.readdir, exports.readlink = _a.readlink, exports.rename = _a.rename, exports.rm = _a.rm, exports.rmdir = _a.rmdir, exports.stat = _a.stat, exports.symlink = _a.symlink, exports.unlink = _a.unlink;
@@ -29766,7 +29767,7 @@ function requireIo () {
 	Object.defineProperty(io, "__esModule", { value: true });
 	io.findInPath = io.which = io.mkdirP = io.rmRF = io.mv = io.cp = void 0;
 	const assert_1 = require$$0$2;
-	const path = __importStar(require$$0$a);
+	const path = __importStar(path__default);
 	const ioUtil = __importStar(requireIoUtil());
 	/**
 	 * Copies a file or folder.
@@ -30074,7 +30075,7 @@ function requireToolrunner () {
 	const os = __importStar(require$$0);
 	const events = __importStar(require$$4$1);
 	const child = __importStar(require$$2$3);
-	const path = __importStar(require$$0$a);
+	const path = __importStar(path__default);
 	const io = __importStar(requireIo());
 	const ioUtil = __importStar(requireIoUtil());
 	const timers_1 = require$$6$1;
@@ -30918,7 +30919,7 @@ function requireCore () {
 		const file_command_1 = requireFileCommand();
 		const utils_1 = requireUtils$2();
 		const os = __importStar(require$$0);
-		const path = __importStar(require$$0$a);
+		const path = __importStar(path__default);
 		const oidc_utils_1 = requireOidcUtils();
 		/**
 		 * The code to exit an action
@@ -31228,6 +31229,23 @@ function requireCore () {
 }
 
 var coreExports = requireCore();
+
+async function getInputs() {
+    const result = {};
+    const githubToken = coreExports.getInput('token') || '';
+    result.githubToken = githubToken;
+    const searchPath = coreExports.getInput('path') || '';
+    result.searchPath = searchPath;
+    const maxDepth = coreExports.getInput('max_depth') || '0';
+    result.maxDepth = parseInt(maxDepth);
+    const patterns = coreExports.getInput('patterns') || '';
+    result.patterns = patterns.split('\n').filter((v) => v !== '');
+    const includeDeletedFiles = coreExports.getInput('include_deleted_files') || 'false';
+    result.includeDeletedFiles = includeDeletedFiles === 'true';
+    const includeOnlyDirectories = coreExports.getInput('include_only_directories') || 'false';
+    result.includeOnlyDirectories = includeOnlyDirectories === 'true';
+    return result;
+}
 
 var utils$1 = {};
 
@@ -32759,7 +32777,7 @@ function requireConstants () {
 	if (hasRequiredConstants) return constants;
 	hasRequiredConstants = 1;
 
-	const path = require$$0$a;
+	const path = path__default;
 	const WIN_SLASH = '\\\\/';
 	const WIN_NO_SLASH = `[^${WIN_SLASH}]`;
 
@@ -32946,7 +32964,7 @@ function requireUtils () {
 	hasRequiredUtils = 1;
 	(function (exports) {
 
-		const path = require$$0$a;
+		const path = path__default;
 		const win32 = process.platform === 'win32';
 		const {
 		  REGEX_BACKSLASH,
@@ -34517,7 +34535,7 @@ function requirePicomatch$1 () {
 	if (hasRequiredPicomatch$1) return picomatch_1;
 	hasRequiredPicomatch$1 = 1;
 
-	const path = require$$0$a;
+	const path = path__default;
 	const scan = requireScan();
 	const parse = requireParse();
 	const utils = requireUtils();
@@ -35356,6 +35374,90 @@ function requireMicromatch () {
 var micromatchExports = requireMicromatch();
 var mm = /*@__PURE__*/getDefaultExportFromCjs(micromatchExports);
 
+class FileInfoArray extends Array {
+    constructor(items) {
+        super();
+        if (items && Array.isArray(items)) {
+            this.push(...items);
+        }
+    }
+    filterByPath(searchPath) {
+        return this.filter((file) => !path.relative(searchPath, file.filename).startsWith('..')).map((file) => ({
+            ...file,
+            filename: path.relative(searchPath, file.filename)
+        }));
+    }
+    filterStatus(status) {
+        return this.filter((file) => file.status !== status);
+    }
+    filterDirectories(maxDepth) {
+        const dirs = new Set();
+        this.forEach((file) => {
+            const dirPath = path.dirname(file.filename);
+            const splitDirs = dirPath.split(path.sep).slice(0, maxDepth);
+            if (dirPath !== '.') {
+                if (maxDepth > 0) {
+                    dirs.add(splitDirs.join(path.sep));
+                }
+                else {
+                    dirs.add(dirPath);
+                }
+            }
+        });
+        const result = Array.from(dirs).map((dir) => ({
+            filename: dir
+        }));
+        return new FileInfoArray(result);
+    }
+    filterPatterns(patterns) {
+        return this.filter((file) => mm.isMatch(file.filename, patterns));
+    }
+}
+async function getFileChangesFromContext(octokit) {
+    if (githubExports.context.eventName === 'pull_request') {
+        if (githubExports.context.payload.pull_request) {
+            const { data } = await octokit.rest.pulls.listFiles({
+                owner: githubExports.context.repo.owner,
+                repo: githubExports.context.repo.repo,
+                pull_number: githubExports.context.payload.pull_request.number
+            });
+            return new FileInfoArray(data);
+        }
+    }
+    else {
+        const { data: commits } = await octokit.rest.repos.compareCommits({
+            owner: githubExports.context.repo.owner,
+            repo: githubExports.context.repo.repo,
+            base: githubExports.context.payload.before,
+            head: githubExports.context.payload.after
+        });
+        return new FileInfoArray(commits.files);
+    }
+    return new FileInfoArray();
+}
+async function getChangedFiles(octokit, includeDeletedFiles, includeOnlyDirectories, searchPath, maxDepth, patterns) {
+    let files = await getFileChangesFromContext(octokit);
+    const changedFiles = [];
+    // Limit the changed files to the ones in searchPath
+    if (searchPath !== '') {
+        files = files.filterByPath(searchPath);
+    }
+    // Filter out the removed files
+    if (!includeDeletedFiles) {
+        files = files.filterStatus('removed');
+    }
+    // Limit the result to be only the directories where the changed files are located
+    if (includeOnlyDirectories) {
+        files = files.filterDirectories(maxDepth);
+    }
+    // Apply user supplied filter patterns to the files/directories that were left
+    if (patterns.length > 0) {
+        files = files.filterPatterns(patterns);
+    }
+    files.map((file) => file.filename).forEach((file) => changedFiles.push(file));
+    return changedFiles;
+}
+
 /**
  * The main function for the action.
  *
@@ -35363,54 +35465,10 @@ var mm = /*@__PURE__*/getDefaultExportFromCjs(micromatchExports);
  */
 async function run() {
     try {
-        const githubToken = coreExports.getInput('token');
-        const patterns = coreExports.getInput('patterns');
-        const includeDeletedFiles = coreExports.getInput('include_deleted_files') === 'true';
-        const splitPatterns = patterns.split('\n').filter((v) => v !== '');
-        const octokit = githubExports.getOctokit(githubToken);
-        let changedFiles = [];
-        const hasPatterns = splitPatterns.length > 0;
-        if (githubExports.context.eventName === 'pull_request') {
-            if (githubExports.context.payload.pull_request) {
-                let { data: files } = await octokit.rest.pulls.listFiles({
-                    owner: githubExports.context.repo.owner,
-                    repo: githubExports.context.repo.repo,
-                    pull_number: githubExports.context.payload.pull_request.number
-                });
-                if (!includeDeletedFiles) {
-                    files = files.filter((file) => file.status !== 'removed');
-                }
-                if (hasPatterns) {
-                    changedFiles = mm(files.map((file) => file.filename), splitPatterns);
-                }
-                else {
-                    files
-                        .map((file) => file.filename)
-                        .forEach((file) => changedFiles.push(file));
-                }
-            }
-        }
-        else {
-            const { data: commits } = await octokit.rest.repos.compareCommits({
-                owner: githubExports.context.repo.owner,
-                repo: githubExports.context.repo.repo,
-                base: githubExports.context.payload.before,
-                head: githubExports.context.payload.after
-            });
-            let files = commits.files || [];
-            if (!includeDeletedFiles) {
-                files = files.filter((file) => file.status !== 'removed');
-            }
-            if (hasPatterns) {
-                changedFiles = mm(files.map((file) => file.filename), splitPatterns);
-            }
-            else {
-                files
-                    ?.map((file) => file.filename)
-                    .forEach((file) => changedFiles.push(file));
-            }
-        }
-        console.log('Changed files:');
+        const inputs = await getInputs();
+        const octokit = githubExports.getOctokit(inputs.githubToken);
+        const changedFiles = await getChangedFiles(octokit, inputs.includeDeletedFiles, inputs.includeOnlyDirectories, inputs.searchPath, inputs.maxDepth, inputs.patterns);
+        console.log(`Changes:`);
         changedFiles.forEach((file) => console.log(`- ${file}`));
         // Set outputs for other workflow steps to use
         coreExports.setOutput('changed_files', JSON.stringify(changedFiles));
