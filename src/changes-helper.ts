@@ -92,22 +92,18 @@ export async function getChangedFiles(
   let files: FileInfoArray = await getFileChangesFromContext(octokit)
   const changedFiles: string[] = []
 
-  // Limit the changed files to the ones in searchPath
   if (searchPath !== '') {
     files = files.filterByPath(searchPath)
   }
 
-  // Filter out the removed files
   if (!includeDeletedFiles) {
     files = files.filterStatus('removed')
   }
 
-  // Limit the result to be only the directories where the changed files are located
   if (includeOnlyDirectories) {
     files = files.filterDirectories(maxDepth)
   }
 
-  // Apply user supplied filter patterns to the files/directories that were left
   if (patterns.length > 0) {
     files = files.filterPatterns(patterns)
   }

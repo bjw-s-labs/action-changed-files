@@ -23,13 +23,14 @@ export async function run(): Promise<void> {
       inputs.patterns
     )
 
-    console.log(`Changes:`)
-    changedFiles.forEach((file) => console.log(`- ${file}`))
+    console.log('Changes:')
+    changedFiles.forEach((file) => console.log(`  - ${file}`))
 
-    // Set outputs for other workflow steps to use
     core.setOutput('changed_files', JSON.stringify(changedFiles))
   } catch (error) {
     // Fail the workflow run if an error occurs
-    if (error instanceof Error) core.setFailed(error.message)
+    if (error instanceof Error) {
+      core.setFailed(error.message)
+    }
   }
 }

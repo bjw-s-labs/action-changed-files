@@ -33,7 +33,7 @@ describe('run', () => {
     // Check logging
     expect(consoleLogSpy).toHaveBeenCalledWith('Changes:')
     mockChangedFiles.forEach((file) => {
-      expect(consoleLogSpy).toHaveBeenCalledWith(`- ${file}`)
+      expect(consoleLogSpy).toHaveBeenCalledWith(`  - ${file}`)
     })
 
     // Check if no failure occurred

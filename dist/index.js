@@ -31232,18 +31232,22 @@ var coreExports = requireCore();
 
 async function getInputs() {
     const result = {};
+    // Get required inputs
     const githubToken = coreExports.getInput('token') || '';
-    result.githubToken = githubToken;
     const searchPath = coreExports.getInput('path') || '';
-    result.searchPath = searchPath;
-    const maxDepth = coreExports.getInput('max_depth') || '0';
-    result.maxDepth = parseInt(maxDepth);
     const patterns = coreExports.getInput('patterns') || '';
-    result.patterns = patterns.split('\n').filter((v) => v !== '');
+    // Parse numeric inputs
+    const maxDepth = parseInt(coreExports.getInput('max_depth') || '0');
+    // Parse boolean inputs
     const includeDeletedFiles = coreExports.getInput('include_deleted_files') || 'false';
-    result.includeDeletedFiles = includeDeletedFiles === 'true';
     const includeOnlyDirectories = coreExports.getInput('include_only_directories') || 'false';
-    result.includeOnlyDirectories = includeOnlyDirectories === 'true';
+    // Assign to result object
+    result.githubToken = githubToken;
+    result.searchPath = searchPath;
+    result.patterns = patterns.split('\n').filter((v) => v !== '');
+    result.maxDepth = maxDepth;
+    result.includeDeletedFiles = includeDeletedFiles == 'true';
+    result.includeOnlyDirectories = includeOnlyDirectories == 'true';
     return result;
 }
 
@@ -35438,19 +35442,15 @@ async function getFileChangesFromContext(octokit) {
 async function getChangedFiles(octokit, includeDeletedFiles, includeOnlyDirectories, searchPath, maxDepth, patterns) {
     let files = await getFileChangesFromContext(octokit);
     const changedFiles = [];
-    // Limit the changed files to the ones in searchPath
     if (searchPath !== '') {
         files = files.filterByPath(searchPath);
     }
-    // Filter out the removed files
     if (!includeDeletedFiles) {
         files = files.filterStatus('removed');
     }
-    // Limit the result to be only the directories where the changed files are located
     if (includeOnlyDirectories) {
         files = files.filterDirectories(maxDepth);
     }
-    // Apply user supplied filter patterns to the files/directories that were left
     if (patterns.length > 0) {
         files = files.filterPatterns(patterns);
     }
@@ -35468,15 +35468,15 @@ async function run() {
         const inputs = await getInputs();
         const octokit = githubExports.getOctokit(inputs.githubToken);
         const changedFiles = await getChangedFiles(octokit, inputs.includeDeletedFiles, inputs.includeOnlyDirectories, inputs.searchPath, inputs.maxDepth, inputs.patterns);
-        console.log(`Changes:`);
-        changedFiles.forEach((file) => console.log(`- ${file}`));
-        // Set outputs for other workflow steps to use
+        console.log('Changes:');
+        changedFiles.forEach((file) => console.log(`  - ${file}`));
         coreExports.setOutput('changed_files', JSON.stringify(changedFiles));
     }
     catch (error) {
         // Fail the workflow run if an error occurs
-        if (error instanceof Error)
+        if (error instanceof Error) {
             coreExports.setFailed(error.message);
+        }
     }
 }
 

@@ -11,19 +11,19 @@ branding:
 # Define your inputs here.
 inputs:
   path:
-    description: 'Path to include in the result'
+    description: 'Base path to start searching from'
     required: false
     default: ''
   patterns:
-    description: 'Glob patterns to match the files against'
+    description: 'Glob patterns to match results against'
     required: false
     default: ''
   include_deleted_files:
-    description: 'Include deleted files in the result?'
+    description: 'Whether to include only deleted files in the results'
     required: false
     default: 'false'
   include_only_directories:
-    description: 'Include only directories with changes in the result?'
+    description: 'Whether to include only directories in the result'
     required: false
     default: 'false'
   max_depth:
@@ -31,7 +31,7 @@ inputs:
     required: false
     default: '0'
   token:
-    description: 'GitHub token'
+    description: 'GitHub token for authentication'
     default: ${{ github.token }}
     required: false
 
