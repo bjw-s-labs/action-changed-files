@@ -19,7 +19,7 @@ inputs:
     required: false
     default: ''
   include_deleted_files:
-    description: 'Whether to include only deleted files in the results'
+    description: 'Whether to include deleted files in the results'
     required: false
     default: 'false'
   include_only_directories:
