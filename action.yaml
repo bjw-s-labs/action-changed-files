@@ -22,10 +22,14 @@ inputs:
     description: 'Include deleted files in the result?'
     required: false
     default: 'false'
-  include_only_folders:
-    description: 'Include only folders with changes in the result?'
+  include_only_directories:
+    description: 'Include only directories with changes in the result?'
     required: false
     default: 'false'
+  max_depth:
+    description: 'Maximum directory depth'
+    required: false
+    default: '0'
   token:
     description: 'GitHub token'
     default: ${{ github.token }}
