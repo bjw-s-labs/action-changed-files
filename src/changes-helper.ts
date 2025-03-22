@@ -1,4 +1,5 @@
 import * as github from '@actions/github'
+import * as core from '@actions/core'
 import * as path from 'path'
 import mm from 'micromatch'
 
@@ -69,7 +70,7 @@ export async function getFileChangesFromContext(
       })
       return new FileInfoArray(data)
     }
-  } else {
+  } else if (github.context.eventName === 'push') {
     const { data: commits } = await octokit.rest.repos.compareCommits({
       owner: github.context.repo.owner,
       repo: github.context.repo.repo,
@@ -77,6 +78,8 @@ export async function getFileChangesFromContext(
       head: github.context.payload.after
     })
     return new FileInfoArray(commits.files)
+  } else {
+    core.warning('This action only works with pull_request and push events.')
   }
   return new FileInfoArray()
 }

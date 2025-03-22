@@ -1,10 +1,13 @@
 import * as github from '@actions/github'
 import { jest } from '@jest/globals'
-import {
-  FileInfo,
-  getFileChangesFromContext,
-  getChangedFiles
-} from '../src/changes-helper.js'
+import * as core from '../__fixtures__/core.js'
+
+jest.unstable_mockModule('@actions/core', () => core)
+
+import { FileInfo } from '../src/changes-helper.js'
+const { getFileChangesFromContext, getChangedFiles } = await import(
+  '../src/changes-helper.js'
+)
 
 // eslint-disable-next-line  @typescript-eslint/no-explicit-any
 let mockOctokit: any
@@ -85,11 +88,19 @@ describe('getFileChangesFromContext', () => {
     const result = await getFileChangesFromContext(mockOctokit)
     expect(result).toEqual([])
   })
+
+  it('should return empty array and a warning for unsupported events', async () => {
+    github.context.eventName = 'workflow_dispatch'
+    github.context.payload = {}
+
+    const result = await getFileChangesFromContext(mockOctokit)
+    expect(core.warning).toHaveBeenCalledTimes(1)
+    expect(result).toEqual([])
+  })
 })
 
 describe('getChangedFiles', () => {
   let mockFiles: FileInfo[]
-
   beforeEach(() => {
     github.context.eventName = 'pull_request'
     github.context.payload = {

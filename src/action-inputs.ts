@@ -8,12 +8,12 @@ export interface ActionInputs {
   githubToken: string
 
   /**
-   * Whether to include only deleted files in the results
+   * Include deleted files in the results?
    */
   includeDeletedFiles: boolean
 
   /**
-   * Whether to include only directories in the result
+   * Include only directories in the results?
    */
   includeOnlyDirectories: boolean
 

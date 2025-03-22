@@ -1,7 +1,7 @@
 {
   "name": "action-changed-files",
   "description": "GitHub Action to return changed files",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "author": "bjw-s-labs",
   "type": "module",
   "private": true,
@@ -49,7 +49,7 @@
     "@rollup/plugin-typescript": "12.1.2",
     "@types/jest": "29.5.14",
     "@typescript-eslint/eslint-plugin": "8.27.0",
-    "eslint": "9.22.0",
+    "eslint": "9.23.0",
     "eslint-config-prettier": "10.1.1",
     "eslint-plugin-import": "2.31.0",
     "eslint-plugin-jest": "28.11.0",

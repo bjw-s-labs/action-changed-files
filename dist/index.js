@@ -35428,7 +35428,7 @@ async function getFileChangesFromContext(octokit) {
             return new FileInfoArray(data);
         }
     }
-    else {
+    else if (githubExports.context.eventName === 'push') {
         const { data: commits } = await octokit.rest.repos.compareCommits({
             owner: githubExports.context.repo.owner,
             repo: githubExports.context.repo.repo,
@@ -35436,6 +35436,9 @@ async function getFileChangesFromContext(octokit) {
             head: githubExports.context.payload.after
         });
         return new FileInfoArray(commits.files);
+    }
+    else {
+        coreExports.warning('This action only works with pull_request and push events.');
     }
     return new FileInfoArray();
 }
