@@ -18,6 +18,7 @@ beforeEach(() => {
 
 describe('getFileChangesFromContext', () => {
   mockOctokit = {
+    paginate: jest.fn(),
     rest: {
       pulls: {
         listFiles: jest.fn()
@@ -28,7 +29,7 @@ describe('getFileChangesFromContext', () => {
     }
   }
 
-  afterEach(() => {
+  beforeEach(() => {
     jest.resetAllMocks()
   })
 
@@ -44,14 +45,17 @@ describe('getFileChangesFromContext', () => {
       { filename: 'file1.txt', status: 'added' },
       { filename: 'file2.txt', status: 'modified' }
     ]
-    mockOctokit.rest.pulls.listFiles.mockResolvedValue({ data: mockFiles })
+    mockOctokit.paginate.mockReturnValueOnce(mockFiles)
 
     const result = await getFileChangesFromContext(mockOctokit)
-    expect(mockOctokit.rest.pulls.listFiles).toHaveBeenCalledWith({
-      owner: 'test-owner',
-      repo: 'test-repo',
-      pull_number: 123
-    })
+    expect(mockOctokit.paginate).toHaveBeenCalledWith(
+      mockOctokit.rest.pulls.listFiles,
+      {
+        owner: 'test-owner',
+        repo: 'test-repo',
+        pull_number: 123
+      }
+    )
     expect(result).toEqual(mockFiles)
   })
 
@@ -100,6 +104,8 @@ describe('getFileChangesFromContext', () => {
 })
 
 describe('getChangedFiles', () => {
+  jest.resetAllMocks()
+
   let mockFiles: FileInfo[]
   beforeEach(() => {
     github.context.eventName = 'pull_request'
@@ -116,11 +122,7 @@ describe('getChangedFiles', () => {
     ]
 
     // Mock getFileChangesFromContext to return our test files
-    mockOctokit.rest.pulls.listFiles.mockResolvedValue({ data: mockFiles })
-  })
-
-  afterEach(() => {
-    jest.resetAllMocks()
+    mockOctokit.paginate.mockReturnValue(mockFiles)
   })
 
   it('should return all files when no filters are applied', async () => {
@@ -182,7 +184,7 @@ describe('getChangedFiles', () => {
   })
 
   it('should handle empty results', async () => {
-    mockOctokit.rest.pulls.listFiles.mockResolvedValue({ data: [] })
+    mockOctokit.paginate.mockReturnValueOnce([])
     const files = await getChangedFiles(mockOctokit, true, false, '', 0, [])
     expect(files).toHaveLength(0)
   })

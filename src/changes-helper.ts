@@ -53,7 +53,9 @@ export class FileInfoArray extends Array<FileInfo> {
 
   filterPatterns(patterns: string[]): FileInfoArray {
     return this.filter((file) =>
-      mm.isMatch(file.filename, patterns)
+      mm.isMatch(file.filename, patterns, {
+        dot: true
+      })
     ) as FileInfoArray
   }
 }
@@ -63,7 +65,7 @@ export async function getFileChangesFromContext(
 ): Promise<FileInfoArray> {
   if (github.context.eventName === 'pull_request') {
     if (github.context.payload.pull_request) {
-      const { data } = await octokit.rest.pulls.listFiles({
+      const data = await octokit.paginate(octokit.rest.pulls.listFiles, {
         owner: github.context.repo.owner,
         repo: github.context.repo.repo,
         pull_number: github.context.payload.pull_request.number

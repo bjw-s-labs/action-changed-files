@@ -35414,13 +35414,15 @@ class FileInfoArray extends Array {
         return new FileInfoArray(result);
     }
     filterPatterns(patterns) {
-        return this.filter((file) => mm.isMatch(file.filename, patterns));
+        return this.filter((file) => mm.isMatch(file.filename, patterns, {
+            dot: true
+        }));
     }
 }
 async function getFileChangesFromContext(octokit) {
     if (githubExports.context.eventName === 'pull_request') {
         if (githubExports.context.payload.pull_request) {
-            const { data } = await octokit.rest.pulls.listFiles({
+            const data = await octokit.paginate(octokit.rest.pulls.listFiles, {
                 owner: githubExports.context.repo.owner,
                 repo: githubExports.context.repo.repo,
                 pull_number: githubExports.context.payload.pull_request.number
