@@ -77,9 +77,9 @@ export async function getFileChangesFromContext(
     const headSha = github.context.payload.after
 
     // TODO: Add tests
-    if (!baseSha) {
+    if (!baseSha || baseSha === '0000000000000000000000000000000000000000') {
       core.warning(
-        'No previous commit SHA set. Assuming this is a new branch, diffing against the default branch.'
+        'No valid previous commit SHA found. Assuming this is a new branch, diffing against the default branch.'
       )
       const repoDetails = await octokit.rest.repos.get({
         owner: github.context.repo.owner,
