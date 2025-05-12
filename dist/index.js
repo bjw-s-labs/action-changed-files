@@ -35432,11 +35432,24 @@ async function getFileChangesFromContext(octokit) {
         }
     }
     else if (githubExports.context.eventName === 'push') {
+        let baseSha = githubExports.context.payload.before;
+        const headSha = githubExports.context.payload.after;
+        // TODO: Add tests
+        if (!baseSha) {
+            coreExports.warning('No previous commit SHA set. Assuming this is a new branch, diffing against the default branch.');
+            const repoDetails = await octokit.rest.repos.get({
+                owner: githubExports.context.repo.owner,
+                repo: githubExports.context.repo.repo
+            });
+            baseSha = repoDetails.data.default_branch;
+        }
+        coreExports.info(`Base: ${baseSha}`);
+        coreExports.info(`Head: ${headSha}`);
         const { data: commits } = await octokit.rest.repos.compareCommits({
             owner: githubExports.context.repo.owner,
             repo: githubExports.context.repo.repo,
-            base: githubExports.context.payload.before,
-            head: githubExports.context.payload.after
+            base: baseSha,
+            head: headSha
         });
         return new FileInfoArray(commits.files);
     }
