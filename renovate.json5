@@ -1,8 +1,5 @@
 {
-  extends: [
-    'github>bjw-s/renovate-config',
-    'github>bjw-s/renovate-config:automerge-github-actions'
-  ],
+  extends: ['github>bjw-s/renovate-config'],
   packageRules: [
     {
       description: 'rollup',
@@ -20,5 +17,10 @@
       automerge: true,
       matchUpdateTypes: ['patch']
     }
-  ]
+  ],
+  postUpgradeTasks: {
+    commands: ['npm run bundle'],
+    fileFilters: ['dist/*'],
+    executionMode: 'update'
+  }
 }
