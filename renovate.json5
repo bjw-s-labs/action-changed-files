@@ -15,7 +15,7 @@
       description: 'Auto merge npm patches',
       matchDatasources: ['npm'],
       automerge: true,
-      schedule: ["before 6am on monday"],
+      schedule: ['before 6am on monday'],
       matchUpdateTypes: ['patch']
     }
   ],
