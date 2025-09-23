@@ -39,10 +39,8 @@ jobs:
 
       - name: Install Dependencies
         id: npm-ci
-        env:
-          CI: true
         run: |
-          pnpm install --frozen-lockfile
+          pnpm run ci
 
       - name: Check Format
         id: npm-format-check
