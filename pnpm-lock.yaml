@@ -42,6 +42,9 @@ importers:
       '@rollup/plugin-typescript':
         specifier: 12.1.4
         version: 12.1.4(rollup@4.50.1)(tslib@2.8.1)(typescript@5.8.2)
+      '@rollup/rollup-linux-x64-gnu':
+        specifier: '*'
+        version: 4.52.2
       '@types/jest':
         specifier: 30.0.0
         version: 30.0.0
@@ -84,10 +87,6 @@ importers:
       ts-jest-resolver:
         specifier: 2.0.1
         version: 2.0.1
-    optionalDependencies:
-      '@rollup/rollup-linux-x64-gnu':
-        specifier: '*'
-        version: 4.52.2
 
 packages:
 
@@ -4411,8 +4410,7 @@ snapshots:
   '@rollup/rollup-linux-x64-gnu@4.50.1':
     optional: true
 
-  '@rollup/rollup-linux-x64-gnu@4.52.2':
-    optional: true
+  '@rollup/rollup-linux-x64-gnu@4.52.2': {}
 
   '@rollup/rollup-linux-x64-musl@4.50.1':
     optional: true
