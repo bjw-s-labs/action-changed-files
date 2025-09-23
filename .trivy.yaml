@@ -1,0 +1,5 @@
+---
+severity:
+  - MEDIUM
+  - HIGH
+  - CRITICAL
