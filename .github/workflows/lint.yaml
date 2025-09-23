@@ -52,6 +52,5 @@ jobs:
           VALIDATE_JSCPD: false
           VALIDATE_JSONC: false ## disable until v7.4.0
           VALIDATE_JSON: false
-          VALIDATE_TRIVY: false
           VALIDATE_TYPESCRIPT_ES: false
           VALIDATE_TYPESCRIPT_STANDARD: false
