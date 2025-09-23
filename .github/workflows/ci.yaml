@@ -24,25 +24,33 @@ jobs:
         with:
           persist-credentials: false
 
+      - uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda # v4.1.0
+        name: Install pnpm
+        with:
+          run_install: false
+
       - name: Setup Node.js
         id: setup-node
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version-file: .node-version
-          cache: npm
+          cache: pnpm
 
       - name: Install Dependencies
         id: npm-ci
-        run: npm ci
+        env:
+          CI: true
+        run: |
+          pnpm install --frozen-lockfile
 
       - name: Check Format
         id: npm-format-check
-        run: npm run format:check
+        run: pnpm run format:check
 
       - name: Lint
         id: npm-lint
-        run: npm run lint
+        run: pnpm run lint
 
       - name: Test
         id: npm-ci-test
-        run: npm run ci-test
+        run: pnpm run ci-test
