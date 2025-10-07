@@ -1,5 +1,5 @@
 import * as core from '@actions/core'
-import { ActionInputs } from './action-inputs.js'
+import type { ActionInputs } from './action-inputs.js'
 
 export async function getInputs(): Promise<ActionInputs> {
   const result = {} as unknown as ActionInputs

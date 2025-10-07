@@ -24,10 +24,10 @@ import require$$3$2 from 'zlib';
 import require$$6 from 'string_decoder';
 import require$$0$8 from 'diagnostics_channel';
 import require$$0$9 from 'crypto';
-import * as path from 'path';
-import path__default from 'path';
+import require$$1$5 from 'path';
 import require$$2$3 from 'child_process';
 import require$$6$1 from 'timers';
+import * as path from 'node:path';
 import mm from 'micromatch';
 
 var commonjsGlobal = typeof globalThis !== 'undefined' ? globalThis : typeof window !== 'undefined' ? window : typeof global !== 'undefined' ? global : typeof self !== 'undefined' ? self : {};
@@ -29496,7 +29496,7 @@ function requirePathUtils () {
 	};
 	Object.defineProperty(pathUtils, "__esModule", { value: true });
 	pathUtils.toPlatformPath = pathUtils.toWin32Path = pathUtils.toPosixPath = void 0;
-	const path = __importStar(path__default);
+	const path = __importStar(require$$1$5);
 	/**
 	 * toPosixPath converts the given path to the posix form. On Windows, \\ will be
 	 * replaced with /.
@@ -29583,7 +29583,7 @@ function requireIoUtil () {
 		Object.defineProperty(exports, "__esModule", { value: true });
 		exports.getCmdPath = exports.tryGetExecutablePath = exports.isRooted = exports.isDirectory = exports.exists = exports.READONLY = exports.UV_FS_O_EXLOCK = exports.IS_WINDOWS = exports.unlink = exports.symlink = exports.stat = exports.rmdir = exports.rm = exports.rename = exports.readlink = exports.readdir = exports.open = exports.mkdir = exports.lstat = exports.copyFile = exports.chmod = void 0;
 		const fs = __importStar(require$$1);
-		const path = __importStar(path__default);
+		const path = __importStar(require$$1$5);
 		_a = fs.promises
 		// export const {open} = 'fs'
 		, exports.chmod = _a.chmod, exports.copyFile = _a.copyFile, exports.lstat = _a.lstat, exports.mkdir = _a.mkdir, exports.open = _a.open, exports.readdir = _a.readdir, exports.readlink = _a.readlink, exports.rename = _a.rename, exports.rm = _a.rm, exports.rmdir = _a.rmdir, exports.stat = _a.stat, exports.symlink = _a.symlink, exports.unlink = _a.unlink;
@@ -29773,7 +29773,7 @@ function requireIo () {
 	Object.defineProperty(io, "__esModule", { value: true });
 	io.findInPath = io.which = io.mkdirP = io.rmRF = io.mv = io.cp = void 0;
 	const assert_1 = require$$0$2;
-	const path = __importStar(path__default);
+	const path = __importStar(require$$1$5);
 	const ioUtil = __importStar(requireIoUtil());
 	/**
 	 * Copies a file or folder.
@@ -30081,7 +30081,7 @@ function requireToolrunner () {
 	const os = __importStar(require$$0);
 	const events = __importStar(require$$4$1);
 	const child = __importStar(require$$2$3);
-	const path = __importStar(path__default);
+	const path = __importStar(require$$1$5);
 	const io = __importStar(requireIo());
 	const ioUtil = __importStar(requireIoUtil());
 	const timers_1 = require$$6$1;
@@ -30925,7 +30925,7 @@ function requireCore () {
 		const file_command_1 = requireFileCommand();
 		const utils_1 = requireUtils();
 		const os = __importStar(require$$0);
-		const path = __importStar(path__default);
+		const path = __importStar(require$$1$5);
 		const oidc_utils_1 = requireOidcUtils();
 		/**
 		 * The code to exit an action
@@ -31243,7 +31243,7 @@ async function getInputs() {
     const searchPath = coreExports.getInput('path') || '';
     const patterns = coreExports.getInput('patterns') || '';
     // Parse numeric inputs
-    const maxDepth = parseInt(coreExports.getInput('max_depth') || '0');
+    const maxDepth = parseInt(coreExports.getInput('max_depth') || '0', 10);
     // Parse boolean inputs
     const includeDeletedFiles = coreExports.getInput('include_deleted_files') || 'false';
     const includeOnlyDirectories = coreExports.getInput('include_only_directories') || 'false';
@@ -31252,8 +31252,8 @@ async function getInputs() {
     result.searchPath = searchPath;
     result.patterns = patterns.split('\n').filter((v) => v !== '');
     result.maxDepth = maxDepth;
-    result.includeDeletedFiles = includeDeletedFiles == 'true';
-    result.includeOnlyDirectories = includeOnlyDirectories == 'true';
+    result.includeDeletedFiles = includeDeletedFiles === 'true';
+    result.includeOnlyDirectories = includeOnlyDirectories === 'true';
     return result;
 }
 
