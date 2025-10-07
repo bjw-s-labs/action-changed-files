@@ -1,5 +1,5 @@
 import * as core from '../__fixtures__/core.js'
-import { ActionInputs } from '../src/action-inputs'
+import type { ActionInputs } from '../src/action-inputs'
 import { jest } from '@jest/globals'
 
 jest.unstable_mockModule('@actions/core', () => core)

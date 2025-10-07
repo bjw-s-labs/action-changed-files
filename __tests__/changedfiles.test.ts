@@ -4,7 +4,7 @@ import * as core from '../__fixtures__/core.js'
 
 jest.unstable_mockModule('@actions/core', () => core)
 
-import { FileInfo } from '../src/changes-helper.js'
+import type { FileInfo } from '../src/changes-helper.js'
 const { getFileChangesFromContext, getChangedFiles } = await import(
   '../src/changes-helper.js'
 )
