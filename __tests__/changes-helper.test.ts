@@ -1,4 +1,4 @@
-import { FileInfo, FileInfoArray } from '../src/changes-helper'
+import { type FileInfo, FileInfoArray } from '../src/changes-helper'
 
 describe('FileInfoArray', () => {
   describe('constructor', () => {

@@ -10,7 +10,7 @@ export async function getInputs(): Promise<ActionInputs> {
   const patterns = core.getInput('patterns') || ''
 
   // Parse numeric inputs
-  const maxDepth = parseInt(core.getInput('max_depth') || '0')
+  const maxDepth = parseInt(core.getInput('max_depth') || '0', 10)
 
   // Parse boolean inputs
   const includeDeletedFiles = core.getInput('include_deleted_files') || 'false'
@@ -22,8 +22,8 @@ export async function getInputs(): Promise<ActionInputs> {
   result.searchPath = searchPath
   result.patterns = patterns.split('\n').filter((v) => v !== '')
   result.maxDepth = maxDepth
-  result.includeDeletedFiles = includeDeletedFiles == 'true'
-  result.includeOnlyDirectories = includeOnlyDirectories == 'true'
+  result.includeDeletedFiles = includeDeletedFiles === 'true'
+  result.includeOnlyDirectories = includeOnlyDirectories === 'true'
 
   return result
 }
