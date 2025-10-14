@@ -41,5 +41,5 @@ outputs:
     description: JSON array of changed files
 
 runs:
-  using: node20
+  using: node24
   main: dist/index.js
