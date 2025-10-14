@@ -40,7 +40,8 @@
   "dependencies": {
     "@actions/core": "1.11.1",
     "@actions/github": "6.0.1",
-    "@types/micromatch": "4.0.9"
+    "@types/micromatch": "4.0.9",
+    "micromatch": "4.0.8"
   },
   "devDependencies": {
     "@eslint/compat": "1.4.0",
