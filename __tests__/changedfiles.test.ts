@@ -5,9 +5,8 @@ import * as core from '../__fixtures__/core.js'
 jest.unstable_mockModule('@actions/core', () => core)
 
 import type { FileInfo } from '../src/changes-helper.js'
-const { getFileChangesFromContext, getChangedFiles } = await import(
-  '../src/changes-helper.js'
-)
+const { getFileChangesFromContext, getChangedFiles } =
+  await import('../src/changes-helper.js')
 
 // eslint-disable-next-line  @typescript-eslint/no-explicit-any
 let mockOctokit: any
