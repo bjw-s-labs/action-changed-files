@@ -145,7 +145,8 @@ function requireProxy$1 () {
 	if (hasRequiredProxy$1) return proxy$1;
 	hasRequiredProxy$1 = 1;
 	Object.defineProperty(proxy$1, "__esModule", { value: true });
-	proxy$1.checkBypass = proxy$1.getProxyUrl = void 0;
+	proxy$1.getProxyUrl = getProxyUrl;
+	proxy$1.checkBypass = checkBypass;
 	function getProxyUrl(reqUrl) {
 	    const usingSsl = reqUrl.protocol === 'https:';
 	    if (checkBypass(reqUrl)) {
@@ -172,7 +173,6 @@ function requireProxy$1 () {
 	        return undefined;
 	    }
 	}
-	proxy$1.getProxyUrl = getProxyUrl;
 	function checkBypass(reqUrl) {
 	    if (!reqUrl.hostname) {
 	        return false;
@@ -216,7 +216,6 @@ function requireProxy$1 () {
 	    }
 	    return false;
 	}
-	proxy$1.checkBypass = checkBypass;
 	function isLoopbackAddress(host) {
 	    const hostLower = host.toLowerCase();
 	    return (hostLower === 'localhost' ||
@@ -24245,13 +24244,23 @@ function requireLib$1 () {
 	}) : function(o, v) {
 	    o["default"] = v;
 	});
-	var __importStar = (lib$1 && lib$1.__importStar) || function (mod) {
-	    if (mod && mod.__esModule) return mod;
-	    var result = {};
-	    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
-	    __setModuleDefault(result, mod);
-	    return result;
-	};
+	var __importStar = (lib$1 && lib$1.__importStar) || (function () {
+	    var ownKeys = function(o) {
+	        ownKeys = Object.getOwnPropertyNames || function (o) {
+	            var ar = [];
+	            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+	            return ar;
+	        };
+	        return ownKeys(o);
+	    };
+	    return function (mod) {
+	        if (mod && mod.__esModule) return mod;
+	        var result = {};
+	        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+	        __setModuleDefault(result, mod);
+	        return result;
+	    };
+	})();
 	var __awaiter = (lib$1 && lib$1.__awaiter) || function (thisArg, _arguments, P, generator) {
 	    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
 	    return new (P || (P = Promise))(function (resolve, reject) {
@@ -24262,7 +24271,9 @@ function requireLib$1 () {
 	    });
 	};
 	Object.defineProperty(lib$1, "__esModule", { value: true });
-	lib$1.HttpClient = lib$1.isHttps = lib$1.HttpClientResponse = lib$1.HttpClientError = lib$1.getProxyUrl = lib$1.MediaTypes = lib$1.Headers = lib$1.HttpCodes = void 0;
+	lib$1.HttpClient = lib$1.HttpClientResponse = lib$1.HttpClientError = lib$1.MediaTypes = lib$1.Headers = lib$1.HttpCodes = void 0;
+	lib$1.getProxyUrl = getProxyUrl;
+	lib$1.isHttps = isHttps;
 	const http = __importStar(require$$2$1);
 	const https = __importStar(require$$1$1);
 	const pm = __importStar(requireProxy$1());
@@ -24315,7 +24326,6 @@ function requireLib$1 () {
 	    const proxyUrl = pm.getProxyUrl(new URL(serverUrl));
 	    return proxyUrl ? proxyUrl.href : '';
 	}
-	lib$1.getProxyUrl = getProxyUrl;
 	const HttpRedirectCodes = [
 	    HttpCodes.MovedPermanently,
 	    HttpCodes.ResourceMoved,
@@ -24376,7 +24386,6 @@ function requireLib$1 () {
 	    const parsedUrl = new URL(requestUrl);
 	    return parsedUrl.protocol === 'https:';
 	}
-	lib$1.isHttps = isHttps;
 	class HttpClient {
 	    constructor(userAgent, handlers, requestOptions) {
 	        this._ignoreSslError = false;
@@ -24387,7 +24396,7 @@ function requireLib$1 () {
 	        this._maxRetries = 1;
 	        this._keepAlive = false;
 	        this._disposed = false;
-	        this.userAgent = userAgent;
+	        this.userAgent = this._getUserAgentWithOrchestrationId(userAgent);
 	        this.handlers = handlers || [];
 	        this.requestOptions = requestOptions;
 	        if (requestOptions) {
@@ -24459,36 +24468,39 @@ function requireLib$1 () {
 	     * Gets a typed object from an endpoint
 	     * Be aware that not found returns a null.  Other errors (4xx, 5xx) reject the promise
 	     */
-	    getJson(requestUrl, additionalHeaders = {}) {
-	        return __awaiter(this, void 0, void 0, function* () {
+	    getJson(requestUrl_1) {
+	        return __awaiter(this, arguments, void 0, function* (requestUrl, additionalHeaders = {}) {
 	            additionalHeaders[Headers.Accept] = this._getExistingOrDefaultHeader(additionalHeaders, Headers.Accept, MediaTypes.ApplicationJson);
 	            const res = yield this.get(requestUrl, additionalHeaders);
 	            return this._processResponse(res, this.requestOptions);
 	        });
 	    }
-	    postJson(requestUrl, obj, additionalHeaders = {}) {
-	        return __awaiter(this, void 0, void 0, function* () {
+	    postJson(requestUrl_1, obj_1) {
+	        return __awaiter(this, arguments, void 0, function* (requestUrl, obj, additionalHeaders = {}) {
 	            const data = JSON.stringify(obj, null, 2);
 	            additionalHeaders[Headers.Accept] = this._getExistingOrDefaultHeader(additionalHeaders, Headers.Accept, MediaTypes.ApplicationJson);
-	            additionalHeaders[Headers.ContentType] = this._getExistingOrDefaultHeader(additionalHeaders, Headers.ContentType, MediaTypes.ApplicationJson);
+	            additionalHeaders[Headers.ContentType] =
+	                this._getExistingOrDefaultContentTypeHeader(additionalHeaders, MediaTypes.ApplicationJson);
 	            const res = yield this.post(requestUrl, data, additionalHeaders);
 	            return this._processResponse(res, this.requestOptions);
 	        });
 	    }
-	    putJson(requestUrl, obj, additionalHeaders = {}) {
-	        return __awaiter(this, void 0, void 0, function* () {
+	    putJson(requestUrl_1, obj_1) {
+	        return __awaiter(this, arguments, void 0, function* (requestUrl, obj, additionalHeaders = {}) {
 	            const data = JSON.stringify(obj, null, 2);
 	            additionalHeaders[Headers.Accept] = this._getExistingOrDefaultHeader(additionalHeaders, Headers.Accept, MediaTypes.ApplicationJson);
-	            additionalHeaders[Headers.ContentType] = this._getExistingOrDefaultHeader(additionalHeaders, Headers.ContentType, MediaTypes.ApplicationJson);
+	            additionalHeaders[Headers.ContentType] =
+	                this._getExistingOrDefaultContentTypeHeader(additionalHeaders, MediaTypes.ApplicationJson);
 	            const res = yield this.put(requestUrl, data, additionalHeaders);
 	            return this._processResponse(res, this.requestOptions);
 	        });
 	    }
-	    patchJson(requestUrl, obj, additionalHeaders = {}) {
-	        return __awaiter(this, void 0, void 0, function* () {
+	    patchJson(requestUrl_1, obj_1) {
+	        return __awaiter(this, arguments, void 0, function* (requestUrl, obj, additionalHeaders = {}) {
 	            const data = JSON.stringify(obj, null, 2);
 	            additionalHeaders[Headers.Accept] = this._getExistingOrDefaultHeader(additionalHeaders, Headers.Accept, MediaTypes.ApplicationJson);
-	            additionalHeaders[Headers.ContentType] = this._getExistingOrDefaultHeader(additionalHeaders, Headers.ContentType, MediaTypes.ApplicationJson);
+	            additionalHeaders[Headers.ContentType] =
+	                this._getExistingOrDefaultContentTypeHeader(additionalHeaders, MediaTypes.ApplicationJson);
 	            const res = yield this.patch(requestUrl, data, additionalHeaders);
 	            return this._processResponse(res, this.requestOptions);
 	        });
@@ -24717,12 +24729,73 @@ function requireLib$1 () {
 	        }
 	        return lowercaseKeys(headers || {});
 	    }
+	    /**
+	     * Gets an existing header value or returns a default.
+	     * Handles converting number header values to strings since HTTP headers must be strings.
+	     * Note: This returns string | string[] since some headers can have multiple values.
+	     * For headers that must always be a single string (like Content-Type), use the
+	     * specialized _getExistingOrDefaultContentTypeHeader method instead.
+	     */
 	    _getExistingOrDefaultHeader(additionalHeaders, header, _default) {
 	        let clientHeader;
 	        if (this.requestOptions && this.requestOptions.headers) {
-	            clientHeader = lowercaseKeys(this.requestOptions.headers)[header];
+	            const headerValue = lowercaseKeys(this.requestOptions.headers)[header];
+	            if (headerValue) {
+	                clientHeader =
+	                    typeof headerValue === 'number' ? headerValue.toString() : headerValue;
+	            }
 	        }
-	        return additionalHeaders[header] || clientHeader || _default;
+	        const additionalValue = additionalHeaders[header];
+	        if (additionalValue !== undefined) {
+	            return typeof additionalValue === 'number'
+	                ? additionalValue.toString()
+	                : additionalValue;
+	        }
+	        if (clientHeader !== undefined) {
+	            return clientHeader;
+	        }
+	        return _default;
+	    }
+	    /**
+	     * Specialized version of _getExistingOrDefaultHeader for Content-Type header.
+	     * Always returns a single string (not an array) since Content-Type should be a single value.
+	     * Converts arrays to comma-separated strings and numbers to strings to ensure type safety.
+	     * This was split from _getExistingOrDefaultHeader to provide stricter typing for callers
+	     * that assign the result to places expecting a string (e.g., additionalHeaders[Headers.ContentType]).
+	     */
+	    _getExistingOrDefaultContentTypeHeader(additionalHeaders, _default) {
+	        let clientHeader;
+	        if (this.requestOptions && this.requestOptions.headers) {
+	            const headerValue = lowercaseKeys(this.requestOptions.headers)[Headers.ContentType];
+	            if (headerValue) {
+	                if (typeof headerValue === 'number') {
+	                    clientHeader = String(headerValue);
+	                }
+	                else if (Array.isArray(headerValue)) {
+	                    clientHeader = headerValue.join(', ');
+	                }
+	                else {
+	                    clientHeader = headerValue;
+	                }
+	            }
+	        }
+	        const additionalValue = additionalHeaders[Headers.ContentType];
+	        // Return the first non-undefined value, converting numbers or arrays to strings if necessary
+	        if (additionalValue !== undefined) {
+	            if (typeof additionalValue === 'number') {
+	                return String(additionalValue);
+	            }
+	            else if (Array.isArray(additionalValue)) {
+	                return additionalValue.join(', ');
+	            }
+	            else {
+	                return additionalValue;
+	            }
+	        }
+	        if (clientHeader !== undefined) {
+	            return clientHeader;
+	        }
+	        return _default;
 	    }
 	    _getAgent(parsedUrl) {
 	        let agent;
@@ -24802,6 +24875,17 @@ function requireLib$1 () {
 	            });
 	        }
 	        return proxyAgent;
+	    }
+	    _getUserAgentWithOrchestrationId(userAgent) {
+	        const baseUserAgent = userAgent || 'actions/http-client';
+	        const orchId = process.env['ACTIONS_ORCHESTRATION_ID'];
+	        if (orchId) {
+	            // Sanitize the orchestration ID to ensure it contains only valid characters
+	            // Valid characters: 0-9, a-z, _, -, .
+	            const sanitizedId = orchId.replace(/[^a-z0-9_.-]/gi, '_');
+	            return `${baseUserAgent} actions_orchestration_id/${sanitizedId}`;
+	        }
+	        return baseUserAgent;
 	    }
 	    _performExponentialBackoff(retryNumber) {
 	        return __awaiter(this, void 0, void 0, function* () {
@@ -24903,13 +24987,23 @@ function requireUtils$4 () {
 	}) : function(o, v) {
 	    o["default"] = v;
 	});
-	var __importStar = (utils$4 && utils$4.__importStar) || function (mod) {
-	    if (mod && mod.__esModule) return mod;
-	    var result = {};
-	    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
-	    __setModuleDefault(result, mod);
-	    return result;
-	};
+	var __importStar = (utils$4 && utils$4.__importStar) || (function () {
+	    var ownKeys = function(o) {
+	        ownKeys = Object.getOwnPropertyNames || function (o) {
+	            var ar = [];
+	            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+	            return ar;
+	        };
+	        return ownKeys(o);
+	    };
+	    return function (mod) {
+	        if (mod && mod.__esModule) return mod;
+	        var result = {};
+	        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+	        __setModuleDefault(result, mod);
+	        return result;
+	    };
+	})();
 	var __awaiter = (utils$4 && utils$4.__awaiter) || function (thisArg, _arguments, P, generator) {
 	    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
 	    return new (P || (P = Promise))(function (resolve, reject) {
@@ -24920,7 +25014,11 @@ function requireUtils$4 () {
 	    });
 	};
 	Object.defineProperty(utils$4, "__esModule", { value: true });
-	utils$4.getApiBaseUrl = utils$4.getProxyFetch = utils$4.getProxyAgentDispatcher = utils$4.getProxyAgent = utils$4.getAuthString = void 0;
+	utils$4.getAuthString = getAuthString;
+	utils$4.getProxyAgent = getProxyAgent;
+	utils$4.getProxyAgentDispatcher = getProxyAgentDispatcher;
+	utils$4.getProxyFetch = getProxyFetch;
+	utils$4.getApiBaseUrl = getApiBaseUrl;
 	const httpClient = __importStar(requireLib$1());
 	const undici_1 = requireUndici();
 	function getAuthString(token, options) {
@@ -24932,17 +25030,14 @@ function requireUtils$4 () {
 	    }
 	    return typeof options.auth === 'string' ? options.auth : `token ${token}`;
 	}
-	utils$4.getAuthString = getAuthString;
 	function getProxyAgent(destinationUrl) {
 	    const hc = new httpClient.HttpClient();
 	    return hc.getAgent(destinationUrl);
 	}
-	utils$4.getProxyAgent = getProxyAgent;
 	function getProxyAgentDispatcher(destinationUrl) {
 	    const hc = new httpClient.HttpClient();
 	    return hc.getAgentDispatcher(destinationUrl);
 	}
-	utils$4.getProxyAgentDispatcher = getProxyAgentDispatcher;
 	function getProxyFetch(destinationUrl) {
 	    const httpDispatcher = getProxyAgentDispatcher(destinationUrl);
 	    const proxyFetch = (url, opts) => __awaiter(this, void 0, void 0, function* () {
@@ -24950,11 +25045,9 @@ function requireUtils$4 () {
 	    });
 	    return proxyFetch;
 	}
-	utils$4.getProxyFetch = getProxyFetch;
 	function getApiBaseUrl() {
 	    return process.env['GITHUB_API_URL'] || 'https://api.github.com';
 	}
-	utils$4.getApiBaseUrl = getApiBaseUrl;
 	
 	return utils$4;
 }
@@ -28670,15 +28763,26 @@ function requireUtils$3 () {
 		}) : function(o, v) {
 		    o["default"] = v;
 		});
-		var __importStar = (utils$5 && utils$5.__importStar) || function (mod) {
-		    if (mod && mod.__esModule) return mod;
-		    var result = {};
-		    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
-		    __setModuleDefault(result, mod);
-		    return result;
-		};
+		var __importStar = (utils$5 && utils$5.__importStar) || (function () {
+		    var ownKeys = function(o) {
+		        ownKeys = Object.getOwnPropertyNames || function (o) {
+		            var ar = [];
+		            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+		            return ar;
+		        };
+		        return ownKeys(o);
+		    };
+		    return function (mod) {
+		        if (mod && mod.__esModule) return mod;
+		        var result = {};
+		        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+		        __setModuleDefault(result, mod);
+		        return result;
+		    };
+		})();
 		Object.defineProperty(exports$1, "__esModule", { value: true });
-		exports$1.getOctokitOptions = exports$1.GitHub = exports$1.defaults = exports$1.context = void 0;
+		exports$1.GitHub = exports$1.defaults = exports$1.context = void 0;
+		exports$1.getOctokitOptions = getOctokitOptions;
 		const Context = __importStar(requireContext());
 		const Utils = __importStar(requireUtils$4());
 		// octokit + plugins
@@ -28710,7 +28814,6 @@ function requireUtils$3 () {
 		    }
 		    return opts;
 		}
-		exports$1.getOctokitOptions = getOctokitOptions;
 		
 	} (utils$5));
 	return utils$5;
@@ -28737,15 +28840,26 @@ function requireGithub () {
 	}) : function(o, v) {
 	    o["default"] = v;
 	});
-	var __importStar = (github && github.__importStar) || function (mod) {
-	    if (mod && mod.__esModule) return mod;
-	    var result = {};
-	    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
-	    __setModuleDefault(result, mod);
-	    return result;
-	};
+	var __importStar = (github && github.__importStar) || (function () {
+	    var ownKeys = function(o) {
+	        ownKeys = Object.getOwnPropertyNames || function (o) {
+	            var ar = [];
+	            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+	            return ar;
+	        };
+	        return ownKeys(o);
+	    };
+	    return function (mod) {
+	        if (mod && mod.__esModule) return mod;
+	        var result = {};
+	        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+	        __setModuleDefault(result, mod);
+	        return result;
+	    };
+	})();
 	Object.defineProperty(github, "__esModule", { value: true });
-	github.getOctokit = github.context = void 0;
+	github.context = void 0;
+	github.getOctokit = getOctokit;
 	const Context = __importStar(requireContext());
 	const utils_1 = requireUtils$3();
 	github.context = new Context.Context();
@@ -28759,7 +28873,6 @@ function requireGithub () {
 	    const GitHubWithPlugins = utils_1.GitHub.plugin(...additionalPlugins);
 	    return new GitHubWithPlugins((0, utils_1.getOctokitOptions)(token, options));
 	}
-	github.getOctokit = getOctokit;
 	
 	return github;
 }
