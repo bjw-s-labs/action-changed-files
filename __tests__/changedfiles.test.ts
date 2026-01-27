@@ -1,10 +1,24 @@
-import * as github from '@actions/github'
 import { jest } from '@jest/globals'
+import type { FileInfo } from '../src/changes-helper.js'
 import * as core from '../__fixtures__/core.js'
+
+const mockGithubContext = {
+  eventName: '',
+  payload: {},
+  get repo() {
+    const [owner, repo] = (process.env.GITHUB_REPOSITORY ?? '/').split('/')
+    return { owner: owner || '', repo: repo || '' }
+  }
+}
+
+jest.unstable_mockModule('@actions/github', () => ({
+  context: mockGithubContext,
+  getOctokit: jest.fn()
+}))
 
 jest.unstable_mockModule('@actions/core', () => core)
 
-import type { FileInfo } from '../src/changes-helper.js'
+const github = await import('@actions/github')
 const { getFileChangesFromContext, getChangedFiles } =
   await import('../src/changes-helper.js')
 
