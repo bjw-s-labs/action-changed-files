@@ -1,4 +1,21 @@
-import { type FileInfo, FileInfoArray } from '../src/changes-helper'
+import { jest } from '@jest/globals'
+import type { FileInfo } from '../src/changes-helper'
+
+const mockGithubContext = {
+  eventName: '',
+  payload: {},
+  get repo() {
+    const [owner, repo] = (process.env.GITHUB_REPOSITORY ?? '/').split('/')
+    return { owner: owner || '', repo: repo || '' }
+  }
+}
+
+jest.unstable_mockModule('@actions/github', () => ({
+  context: mockGithubContext,
+  getOctokit: jest.fn()
+}))
+
+const { FileInfoArray } = await import('../src/changes-helper')
 
 describe('FileInfoArray', () => {
   describe('constructor', () => {
