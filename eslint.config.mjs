@@ -7,11 +7,7 @@ import _import from 'eslint-plugin-import'
 import jest from 'eslint-plugin-jest'
 import prettier from 'eslint-plugin-prettier'
 import globals from 'globals'
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = path.dirname(__filename)
 const compat = new FlatCompat({
   baseDirectory: import.meta.dirname,
   recommendedConfig: js.configs.recommended,
@@ -57,7 +53,8 @@ export default [
             'eslint.config.mjs',
             'jest.config.js',
             'rollup.config.ts'
-          ]
+          ],
+          maximumDefaultProjectFileMatchCount_THIS_WILL_SLOW_DOWN_LINTING: 12
         },
         tsconfigRootDir: import.meta.dirname
       }
