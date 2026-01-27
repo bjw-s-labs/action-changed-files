@@ -1,157 +1,107 @@
-import require$$1 from 'fs';
-import require$$0 from 'os';
-import require$$2$1 from 'http';
-import require$$3$1 from 'https';
+import require$$1$6, { existsSync, readFileSync } from 'fs';
+import require$$0$9, { EOL } from 'os';
+import require$$0 from 'http';
+import require$$1 from 'https';
 import 'net';
 import require$$1$1 from 'tls';
-import require$$4$1 from 'events';
+import require$$4 from 'events';
 import require$$5$2 from 'assert';
 import require$$0$1 from 'util';
 import require$$0$2 from 'node:assert';
 import require$$0$4 from 'node:net';
-import require$$2$2 from 'node:http';
+import require$$2 from 'node:http';
 import require$$0$3 from 'node:stream';
 import require$$5 from 'node:querystring';
 import require$$6 from 'node:events';
 import require$$0$6 from 'node:diagnostics_channel';
 import require$$0$5 from 'node:util';
-import require$$4$2 from 'node:tls';
+import require$$4$1 from 'node:tls';
 import require$$0$7 from 'node:buffer';
-import require$$3$2 from 'node:zlib';
+import require$$3 from 'node:zlib';
 import require$$5$1 from 'node:perf_hooks';
 import require$$8 from 'node:util/types';
-import require$$2$4 from 'node:crypto';
+import require$$2$2 from 'node:crypto';
 import require$$1$2 from 'node:sqlite';
-import require$$2$3 from 'node:worker_threads';
+import require$$2$1 from 'node:worker_threads';
 import require$$1$3 from 'node:async_hooks';
 import require$$1$4 from 'node:console';
 import require$$0$8 from 'node:fs/promises';
 import * as path from 'node:path';
 import path__default from 'node:path';
-import require$$2$5 from 'node:timers';
+import require$$2$3 from 'node:timers';
 import require$$1$5 from 'node:dns';
-import require$$0$9 from 'crypto';
-import require$$0$a from 'path';
-import require$$0$b from 'string_decoder';
-import require$$2$6 from 'child_process';
+import require$$0$a from 'crypto';
+import require$$0$b from 'path';
+import require$$0$c from 'string_decoder';
+import require$$2$4 from 'child_process';
 import require$$6$1 from 'timers';
+
+class Context {
+    /**
+     * Hydrate the context from the environment
+     */
+    constructor() {
+        var _a, _b, _c;
+        this.payload = {};
+        if (process.env.GITHUB_EVENT_PATH) {
+            if (existsSync(process.env.GITHUB_EVENT_PATH)) {
+                this.payload = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, { encoding: 'utf8' }));
+            }
+            else {
+                const path = process.env.GITHUB_EVENT_PATH;
+                process.stdout.write(`GITHUB_EVENT_PATH ${path} does not exist${EOL}`);
+            }
+        }
+        this.eventName = process.env.GITHUB_EVENT_NAME;
+        this.sha = process.env.GITHUB_SHA;
+        this.ref = process.env.GITHUB_REF;
+        this.workflow = process.env.GITHUB_WORKFLOW;
+        this.action = process.env.GITHUB_ACTION;
+        this.actor = process.env.GITHUB_ACTOR;
+        this.job = process.env.GITHUB_JOB;
+        this.runAttempt = parseInt(process.env.GITHUB_RUN_ATTEMPT, 10);
+        this.runNumber = parseInt(process.env.GITHUB_RUN_NUMBER, 10);
+        this.runId = parseInt(process.env.GITHUB_RUN_ID, 10);
+        this.apiUrl = (_a = process.env.GITHUB_API_URL) !== null && _a !== void 0 ? _a : `https://api.github.com`;
+        this.serverUrl = (_b = process.env.GITHUB_SERVER_URL) !== null && _b !== void 0 ? _b : `https://github.com`;
+        this.graphqlUrl =
+            (_c = process.env.GITHUB_GRAPHQL_URL) !== null && _c !== void 0 ? _c : `https://api.github.com/graphql`;
+    }
+    get issue() {
+        const payload = this.payload;
+        return Object.assign(Object.assign({}, this.repo), { number: (payload.issue || payload.pull_request || payload).number });
+    }
+    get repo() {
+        if (process.env.GITHUB_REPOSITORY) {
+            const [owner, repo] = process.env.GITHUB_REPOSITORY.split('/');
+            return { owner, repo };
+        }
+        if (this.payload.repository) {
+            return {
+                owner: this.payload.repository.owner.login,
+                repo: this.payload.repository.name
+            };
+        }
+        throw new Error("context.repo requires a GITHUB_REPOSITORY environment variable like 'owner/repo'");
+    }
+}
 
 function getDefaultExportFromCjs (x) {
 	return x && x.__esModule && Object.prototype.hasOwnProperty.call(x, 'default') ? x['default'] : x;
 }
 
-function getAugmentedNamespace(n) {
-  if (Object.prototype.hasOwnProperty.call(n, '__esModule')) return n;
-  var f = n.default;
-	if (typeof f == "function") {
-		var a = function a () {
-			var isInstance = false;
-      try {
-        isInstance = this instanceof a;
-      } catch {}
-			if (isInstance) {
-        return Reflect.construct(f, arguments, this.constructor);
-			}
-			return f.apply(this, arguments);
-		};
-		a.prototype = f.prototype;
-  } else a = {};
-  Object.defineProperty(a, '__esModule', {value: true});
-	Object.keys(n).forEach(function (k) {
-		var d = Object.getOwnPropertyDescriptor(n, k);
-		Object.defineProperty(a, k, d.get ? d : {
-			enumerable: true,
-			get: function () {
-				return n[k];
-			}
-		});
-	});
-	return a;
-}
+var lib$1 = {};
 
-var github = {};
+var proxy$1 = {};
 
-var context = {};
+var hasRequiredProxy$1;
 
-var hasRequiredContext;
-
-function requireContext () {
-	if (hasRequiredContext) return context;
-	hasRequiredContext = 1;
-	Object.defineProperty(context, "__esModule", { value: true });
-	context.Context = void 0;
-	const fs_1 = require$$1;
-	const os_1 = require$$0;
-	class Context {
-	    /**
-	     * Hydrate the context from the environment
-	     */
-	    constructor() {
-	        var _a, _b, _c;
-	        this.payload = {};
-	        if (process.env.GITHUB_EVENT_PATH) {
-	            if ((0, fs_1.existsSync)(process.env.GITHUB_EVENT_PATH)) {
-	                this.payload = JSON.parse((0, fs_1.readFileSync)(process.env.GITHUB_EVENT_PATH, { encoding: 'utf8' }));
-	            }
-	            else {
-	                const path = process.env.GITHUB_EVENT_PATH;
-	                process.stdout.write(`GITHUB_EVENT_PATH ${path} does not exist${os_1.EOL}`);
-	            }
-	        }
-	        this.eventName = process.env.GITHUB_EVENT_NAME;
-	        this.sha = process.env.GITHUB_SHA;
-	        this.ref = process.env.GITHUB_REF;
-	        this.workflow = process.env.GITHUB_WORKFLOW;
-	        this.action = process.env.GITHUB_ACTION;
-	        this.actor = process.env.GITHUB_ACTOR;
-	        this.job = process.env.GITHUB_JOB;
-	        this.runAttempt = parseInt(process.env.GITHUB_RUN_ATTEMPT, 10);
-	        this.runNumber = parseInt(process.env.GITHUB_RUN_NUMBER, 10);
-	        this.runId = parseInt(process.env.GITHUB_RUN_ID, 10);
-	        this.apiUrl = (_a = process.env.GITHUB_API_URL) !== null && _a !== void 0 ? _a : `https://api.github.com`;
-	        this.serverUrl = (_b = process.env.GITHUB_SERVER_URL) !== null && _b !== void 0 ? _b : `https://github.com`;
-	        this.graphqlUrl =
-	            (_c = process.env.GITHUB_GRAPHQL_URL) !== null && _c !== void 0 ? _c : `https://api.github.com/graphql`;
-	    }
-	    get issue() {
-	        const payload = this.payload;
-	        return Object.assign(Object.assign({}, this.repo), { number: (payload.issue || payload.pull_request || payload).number });
-	    }
-	    get repo() {
-	        if (process.env.GITHUB_REPOSITORY) {
-	            const [owner, repo] = process.env.GITHUB_REPOSITORY.split('/');
-	            return { owner, repo };
-	        }
-	        if (this.payload.repository) {
-	            return {
-	                owner: this.payload.repository.owner.login,
-	                repo: this.payload.repository.name
-	            };
-	        }
-	        throw new Error("context.repo requires a GITHUB_REPOSITORY environment variable like 'owner/repo'");
-	    }
-	}
-	context.Context = Context;
-	
-	return context;
-}
-
-var utils$5 = {};
-
-var utils$4 = {};
-
-var lib = {};
-
-var proxy = {};
-
-var hasRequiredProxy;
-
-function requireProxy () {
-	if (hasRequiredProxy) return proxy;
-	hasRequiredProxy = 1;
-	Object.defineProperty(proxy, "__esModule", { value: true });
-	proxy.getProxyUrl = getProxyUrl;
-	proxy.checkBypass = checkBypass;
+function requireProxy$1 () {
+	if (hasRequiredProxy$1) return proxy$1;
+	hasRequiredProxy$1 = 1;
+	Object.defineProperty(proxy$1, "__esModule", { value: true });
+	proxy$1.getProxyUrl = getProxyUrl;
+	proxy$1.checkBypass = checkBypass;
 	function getProxyUrl(reqUrl) {
 	    const usingSsl = reqUrl.protocol === 'https:';
 	    if (checkBypass(reqUrl)) {
@@ -242,7 +192,7 @@ function requireProxy () {
 	    }
 	}
 	
-	return proxy;
+	return proxy$1;
 }
 
 var tunnel$1 = {};
@@ -253,9 +203,9 @@ function requireTunnel$1 () {
 	if (hasRequiredTunnel$1) return tunnel$1;
 	hasRequiredTunnel$1 = 1;
 	var tls = require$$1$1;
-	var http = require$$2$1;
-	var https = require$$3$1;
-	var events = require$$4$1;
+	var http = require$$0;
+	var https = require$$1;
+	var events = require$$4;
 	var util = require$$0$1;
 
 
@@ -1825,7 +1775,7 @@ function requireUtil$5 () {
 
 	const assert = require$$0$2;
 	const { kDestroyed, kBodyUsed, kListeners, kBody } = requireSymbols();
-	const { IncomingMessage } = require$$2$2;
+	const { IncomingMessage } = require$$2;
 	const stream = require$$0$3;
 	const net = require$$0$4;
 	const { stringify } = require$$5;
@@ -3992,7 +3942,7 @@ function requireConnect () {
 	    let socket;
 	    if (protocol === 'https:') {
 	      if (!tls) {
-	        tls = require$$4$2;
+	        tls = require$$4$1;
 	      }
 	      servername = servername || options.servername || util.getServerName(host) || null;
 
@@ -4078,11 +4028,11 @@ var constants$5 = {};
 
 var utils$3 = {};
 
-var hasRequiredUtils$5;
+var hasRequiredUtils$3;
 
-function requireUtils$5 () {
-	if (hasRequiredUtils$5) return utils$3;
-	hasRequiredUtils$5 = 1;
+function requireUtils$3 () {
+	if (hasRequiredUtils$3) return utils$3;
+	hasRequiredUtils$3 = 1;
 	Object.defineProperty(utils$3, "__esModule", { value: true });
 	utils$3.enumToMap = enumToMap;
 	function enumToMap(obj, filter = [], exceptions = []) {
@@ -4105,7 +4055,7 @@ function requireConstants$5 () {
 	(function (exports$1) {
 		Object.defineProperty(exports$1, "__esModule", { value: true });
 		exports$1.SPECIAL_HEADERS = exports$1.MINOR = exports$1.MAJOR = exports$1.HTAB_SP_VCHAR_OBS_TEXT = exports$1.QUOTED_STRING = exports$1.CONNECTION_TOKEN_CHARS = exports$1.HEADER_CHARS = exports$1.TOKEN = exports$1.HEX = exports$1.URL_CHAR = exports$1.USERINFO_CHARS = exports$1.MARK = exports$1.ALPHANUM = exports$1.NUM = exports$1.HEX_MAP = exports$1.NUM_MAP = exports$1.ALPHA = exports$1.STATUSES_HTTP = exports$1.H_METHOD_MAP = exports$1.METHOD_MAP = exports$1.METHODS_RTSP = exports$1.METHODS_ICE = exports$1.METHODS_HTTP = exports$1.HEADER_STATE = exports$1.FINISH = exports$1.STATUSES = exports$1.METHODS = exports$1.LENIENT_FLAGS = exports$1.FLAGS = exports$1.TYPE = exports$1.ERROR = void 0;
-		const utils_1 = requireUtils$5();
+		const utils_1 = requireUtils$3();
 		// Emums
 		exports$1.ERROR = {
 		    OK: 0,
@@ -5775,10 +5725,10 @@ function requireRuntimeFeatures () {
 	/** @type {Record<NodeModuleName, () => any>} */
 	const lazyLoaders = {
 	  __proto__: null,
-	  'node:crypto': () => require$$2$4,
+	  'node:crypto': () => require$$2$2,
 	  'node:sqlite': () => require$$1$2,
-	  'node:worker_threads': () => require$$2$3,
-	  'node:zlib': () => require$$3$2
+	  'node:worker_threads': () => require$$2$1,
+	  'node:zlib': () => require$$3
 	};
 
 	/**
@@ -6060,7 +6010,7 @@ function requireWebidl () {
 	};
 
 	webidl.util.markAsUncloneable = runtimeFeatures.has('markAsUncloneable')
-	  ? require$$2$3.markAsUncloneable
+	  ? require$$2$1.markAsUncloneable
 	  : () => {};
 
 	// https://webidl.spec.whatwg.org/#abstract-opdef-converttoint
@@ -6862,7 +6812,7 @@ function requireUtil$4 () {
 	hasRequiredUtil$4 = 1;
 
 	const { Transform } = require$$0$3;
-	const zlib = require$$3$2;
+	const zlib = require$$3;
 	const { redirectStatusSet, referrerPolicyTokens, badPortsSet } = requireConstants$4();
 	const { getGlobalOrigin } = requireGlobal$1();
 	const { collectAnHTTPQuotedString, parseMIMEType } = requireDataUrl();
@@ -9292,7 +9242,7 @@ function requireBody () {
 	const { runtimeFeatures } = requireRuntimeFeatures();
 
 	const random = runtimeFeatures.has('crypto')
-	  ? require$$2$4.randomInt
+	  ? require$$2$2.randomInt
 	  : (max) => Math.floor(Math.random() * max);
 
 	const textEncoder = new TextEncoder();
@@ -12385,7 +12335,7 @@ function requireClient () {
 
 	const assert = require$$0$2;
 	const net = require$$0$4;
-	const http = require$$2$2;
+	const http = require$$2;
 	const util = requireUtil$5();
 	const { ClientStats } = requireStats();
 	const { channels } = requireDiagnostics();
@@ -16692,7 +16642,7 @@ function requireMockUtils () {
 	  kGetNetConnect
 	} = requireMockSymbols();
 	const { serializePathWithQuery } = requireUtil$5();
-	const { STATUS_CODES } = require$$2$2;
+	const { STATUS_CODES } = require$$2;
 	const {
 	  types: {
 	    isPromise
@@ -18083,7 +18033,7 @@ function requireSnapshotUtils () {
 	}
 
 	const crypto = runtimeFeatures.has('crypto')
-	  ? require$$2$4
+	  ? require$$2$2
 	  : null;
 
 	/**
@@ -18224,7 +18174,7 @@ function requireSnapshotRecorder () {
 
 	const { writeFile, readFile, mkdir } = require$$0$8;
 	const { dirname, resolve } = path__default;
-	const { setTimeout, clearTimeout } = require$$2$5;
+	const { setTimeout, clearTimeout } = require$$2$3;
 	const { InvalidArgumentError, UndiciError } = requireErrors();
 	const { hashId, isUrlExcludedFactory, normalizeHeaders, createHeaderFilters } = requireSnapshotUtils();
 
@@ -22783,7 +22733,7 @@ function requireDecompress () {
 	if (hasRequiredDecompress) return decompress;
 	hasRequiredDecompress = 1;
 
-	const { createInflate, createGunzip, createBrotliDecompress, createZstdDecompress } = require$$3$2;
+	const { createInflate, createGunzip, createBrotliDecompress, createZstdDecompress } = require$$3;
 	const { pipeline } = require$$0$3;
 	const DecoratorHandler = requireDecoratorHandler();
 	const { runtimeFeatures } = requireRuntimeFeatures();
@@ -26393,7 +26343,7 @@ function requireSubresourceIntegrity () {
 	let crypto;
 
 	if (runtimeFeatures.has('crypto')) {
-	  crypto = require$$2$4;
+	  crypto = require$$2$2;
 	  const cryptoHashes = crypto.getHashes();
 
 	  // If no hashes are available, we cannot support SRI.
@@ -26684,7 +26634,7 @@ function requireFetch () {
 	} = requireResponse();
 	const { HeadersList } = requireHeaders();
 	const { Request, cloneRequest, getRequestDispatcher, getRequestState } = requireRequest();
-	const zlib = require$$3$2;
+	const zlib = require$$3;
 	const {
 	  makePolicyContainer,
 	  clonePolicyContainer,
@@ -26734,7 +26684,7 @@ function requireFetch () {
 	const { dataURLProcessor, serializeAMimeType, minimizeSupportedMimeType } = requireDataUrl();
 	const { getGlobalDispatcher } = requireGlobal();
 	const { webidl } = requireWebidl();
-	const { STATUS_CODES } = require$$2$2;
+	const { STATUS_CODES } = require$$2;
 	const { bytesMatch } = requireSubresourceIntegrity();
 	const { createDeferredPromise } = requirePromise();
 	const { isomorphicEncode } = requireInfra();
@@ -31723,7 +31673,7 @@ function requireFrame () {
 	let bufIdx = BUFFER_SIZE;
 
 	const randomFillSync = runtimeFeatures.has('crypto')
-	  ? require$$2$4.randomFillSync
+	  ? require$$2$2.randomFillSync
 	  // not full compatibility, but minimum.
 	  : function randomFillSync (buffer, _offset, _size) {
 	    for (let i = 0; i < buffer.length; ++i) {
@@ -31866,7 +31816,7 @@ function requireConnection () {
 	const { runtimeFeatures } = requireRuntimeFeatures();
 
 	const crypto = runtimeFeatures.has('crypto')
-	  ? require$$2$4
+	  ? require$$2$2
 	  : null;
 
 	let warningEmitted = false;
@@ -32190,7 +32140,7 @@ function requirePermessageDeflate () {
 	if (hasRequiredPermessageDeflate) return permessageDeflate;
 	hasRequiredPermessageDeflate = 1;
 
-	const { createInflateRaw, Z_DEFAULT_WINDOWBITS } = require$$3$2;
+	const { createInflateRaw, Z_DEFAULT_WINDOWBITS } = require$$3;
 	const { isValidClientWindowBits } = requireUtil$1();
 
 	const tail = Buffer.from([0x00, 0x00, 0xff, 0xff]);
@@ -35360,13 +35310,13 @@ function requireUndici () {
 	return undici.exports;
 }
 
-var hasRequiredLib;
+var hasRequiredLib$1;
 
-function requireLib () {
-	if (hasRequiredLib) return lib;
-	hasRequiredLib = 1;
+function requireLib$1 () {
+	if (hasRequiredLib$1) return lib$1;
+	hasRequiredLib$1 = 1;
 	/* eslint-disable @typescript-eslint/no-explicit-any */
-	var __createBinding = (lib && lib.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+	var __createBinding = (lib$1 && lib$1.__createBinding) || (Object.create ? (function(o, m, k, k2) {
 	    if (k2 === undefined) k2 = k;
 	    var desc = Object.getOwnPropertyDescriptor(m, k);
 	    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
@@ -35377,12 +35327,12 @@ function requireLib () {
 	    if (k2 === undefined) k2 = k;
 	    o[k2] = m[k];
 	}));
-	var __setModuleDefault = (lib && lib.__setModuleDefault) || (Object.create ? (function(o, v) {
+	var __setModuleDefault = (lib$1 && lib$1.__setModuleDefault) || (Object.create ? (function(o, v) {
 	    Object.defineProperty(o, "default", { enumerable: true, value: v });
 	}) : function(o, v) {
 	    o["default"] = v;
 	});
-	var __importStar = (lib && lib.__importStar) || (function () {
+	var __importStar = (lib$1 && lib$1.__importStar) || (function () {
 	    var ownKeys = function(o) {
 	        ownKeys = Object.getOwnPropertyNames || function (o) {
 	            var ar = [];
@@ -35399,7 +35349,7 @@ function requireLib () {
 	        return result;
 	    };
 	})();
-	var __awaiter = (lib && lib.__awaiter) || function (thisArg, _arguments, P, generator) {
+	var __awaiter = (lib$1 && lib$1.__awaiter) || function (thisArg, _arguments, P, generator) {
 	    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
 	    return new (P || (P = Promise))(function (resolve, reject) {
 	        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
@@ -35408,13 +35358,13 @@ function requireLib () {
 	        step((generator = generator.apply(thisArg, _arguments || [])).next());
 	    });
 	};
-	Object.defineProperty(lib, "__esModule", { value: true });
-	lib.HttpClient = lib.HttpClientResponse = lib.HttpClientError = lib.MediaTypes = lib.Headers = lib.HttpCodes = void 0;
-	lib.getProxyUrl = getProxyUrl;
-	lib.isHttps = isHttps;
-	const http = __importStar(require$$2$1);
-	const https = __importStar(require$$3$1);
-	const pm = __importStar(requireProxy());
+	Object.defineProperty(lib$1, "__esModule", { value: true });
+	lib$1.HttpClient = lib$1.HttpClientResponse = lib$1.HttpClientError = lib$1.MediaTypes = lib$1.Headers = lib$1.HttpCodes = void 0;
+	lib$1.getProxyUrl = getProxyUrl;
+	lib$1.isHttps = isHttps;
+	const http = __importStar(require$$0);
+	const https = __importStar(require$$1);
+	const pm = __importStar(requireProxy$1());
 	const tunnel = __importStar(requireTunnel());
 	const undici_1 = requireUndici();
 	var HttpCodes;
@@ -35446,16 +35396,16 @@ function requireLib () {
 	    HttpCodes[HttpCodes["BadGateway"] = 502] = "BadGateway";
 	    HttpCodes[HttpCodes["ServiceUnavailable"] = 503] = "ServiceUnavailable";
 	    HttpCodes[HttpCodes["GatewayTimeout"] = 504] = "GatewayTimeout";
-	})(HttpCodes || (lib.HttpCodes = HttpCodes = {}));
+	})(HttpCodes || (lib$1.HttpCodes = HttpCodes = {}));
 	var Headers;
 	(function (Headers) {
 	    Headers["Accept"] = "accept";
 	    Headers["ContentType"] = "content-type";
-	})(Headers || (lib.Headers = Headers = {}));
+	})(Headers || (lib$1.Headers = Headers = {}));
 	var MediaTypes;
 	(function (MediaTypes) {
 	    MediaTypes["ApplicationJson"] = "application/json";
-	})(MediaTypes || (lib.MediaTypes = MediaTypes = {}));
+	})(MediaTypes || (lib$1.MediaTypes = MediaTypes = {}));
 	/**
 	 * Returns the proxy URL, depending upon the supplied url and proxy environment variables.
 	 * @param serverUrl  The server URL where the request will be sent. For example, https://api.github.com
@@ -35487,7 +35437,7 @@ function requireLib () {
 	        Object.setPrototypeOf(this, HttpClientError.prototype);
 	    }
 	}
-	lib.HttpClientError = HttpClientError;
+	lib$1.HttpClientError = HttpClientError;
 	class HttpClientResponse {
 	    constructor(message) {
 	        this.message = message;
@@ -35519,7 +35469,7 @@ function requireLib () {
 	        });
 	    }
 	}
-	lib.HttpClientResponse = HttpClientResponse;
+	lib$1.HttpClientResponse = HttpClientResponse;
 	function isHttps(requestUrl) {
 	    const parsedUrl = new URL(requestUrl);
 	    return parsedUrl.protocol === 'https:';
@@ -36098,96 +36048,51 @@ function requireLib () {
 	        });
 	    }
 	}
-	lib.HttpClient = HttpClient;
+	lib$1.HttpClient = HttpClient;
 	const lowercaseKeys = (obj) => Object.keys(obj).reduce((c, k) => ((c[k.toLowerCase()] = obj[k]), c), {});
 	
-	return lib;
+	return lib$1;
 }
 
-var hasRequiredUtils$4;
+var libExports = requireLib$1();
 
-function requireUtils$4 () {
-	if (hasRequiredUtils$4) return utils$4;
-	hasRequiredUtils$4 = 1;
-	var __createBinding = (utils$4 && utils$4.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-	    if (k2 === undefined) k2 = k;
-	    var desc = Object.getOwnPropertyDescriptor(m, k);
-	    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-	      desc = { enumerable: true, get: function() { return m[k]; } };
-	    }
-	    Object.defineProperty(o, k2, desc);
-	}) : (function(o, m, k, k2) {
-	    if (k2 === undefined) k2 = k;
-	    o[k2] = m[k];
-	}));
-	var __setModuleDefault = (utils$4 && utils$4.__setModuleDefault) || (Object.create ? (function(o, v) {
-	    Object.defineProperty(o, "default", { enumerable: true, value: v });
-	}) : function(o, v) {
-	    o["default"] = v;
-	});
-	var __importStar = (utils$4 && utils$4.__importStar) || (function () {
-	    var ownKeys = function(o) {
-	        ownKeys = Object.getOwnPropertyNames || function (o) {
-	            var ar = [];
-	            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-	            return ar;
-	        };
-	        return ownKeys(o);
-	    };
-	    return function (mod) {
-	        if (mod && mod.__esModule) return mod;
-	        var result = {};
-	        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-	        __setModuleDefault(result, mod);
-	        return result;
-	    };
-	})();
-	var __awaiter = (utils$4 && utils$4.__awaiter) || function (thisArg, _arguments, P, generator) {
-	    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
-	    return new (P || (P = Promise))(function (resolve, reject) {
-	        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
-	        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
-	        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
-	        step((generator = generator.apply(thisArg, _arguments || [])).next());
-	    });
-	};
-	Object.defineProperty(utils$4, "__esModule", { value: true });
-	utils$4.getAuthString = getAuthString;
-	utils$4.getProxyAgent = getProxyAgent;
-	utils$4.getProxyAgentDispatcher = getProxyAgentDispatcher;
-	utils$4.getProxyFetch = getProxyFetch;
-	utils$4.getApiBaseUrl = getApiBaseUrl;
-	const httpClient = __importStar(requireLib());
-	const undici_1 = requireUndici();
-	function getAuthString(token, options) {
-	    if (!token && !options.auth) {
-	        throw new Error('Parameter token or opts.auth is required');
-	    }
-	    else if (token && options.auth) {
-	        throw new Error('Parameters token and opts.auth may not both be specified');
-	    }
-	    return typeof options.auth === 'string' ? options.auth : `token ${token}`;
-	}
-	function getProxyAgent(destinationUrl) {
-	    const hc = new httpClient.HttpClient();
-	    return hc.getAgent(destinationUrl);
-	}
-	function getProxyAgentDispatcher(destinationUrl) {
-	    const hc = new httpClient.HttpClient();
-	    return hc.getAgentDispatcher(destinationUrl);
-	}
-	function getProxyFetch(destinationUrl) {
-	    const httpDispatcher = getProxyAgentDispatcher(destinationUrl);
-	    const proxyFetch = (url, opts) => __awaiter(this, void 0, void 0, function* () {
-	        return (0, undici_1.fetch)(url, Object.assign(Object.assign({}, opts), { dispatcher: httpDispatcher }));
-	    });
-	    return proxyFetch;
-	}
-	function getApiBaseUrl() {
-	    return process.env['GITHUB_API_URL'] || 'https://api.github.com';
-	}
-	
-	return utils$4;
+var undiciExports = requireUndici();
+
+var __awaiter = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
+    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+    return new (P || (P = Promise))(function (resolve, reject) {
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, _arguments || [])).next());
+    });
+};
+function getAuthString(token, options) {
+    if (!token && !options.auth) {
+        throw new Error('Parameter token or opts.auth is required');
+    }
+    else if (token && options.auth) {
+        throw new Error('Parameters token and opts.auth may not both be specified');
+    }
+    return typeof options.auth === 'string' ? options.auth : `token ${token}`;
+}
+function getProxyAgent(destinationUrl) {
+    const hc = new libExports.HttpClient();
+    return hc.getAgent(destinationUrl);
+}
+function getProxyAgentDispatcher(destinationUrl) {
+    const hc = new libExports.HttpClient();
+    return hc.getAgentDispatcher(destinationUrl);
+}
+function getProxyFetch(destinationUrl) {
+    const httpDispatcher = getProxyAgentDispatcher(destinationUrl);
+    const proxyFetch = (url, opts) => __awaiter(this, void 0, void 0, function* () {
+        return undiciExports.fetch(url, Object.assign(Object.assign({}, opts), { dispatcher: httpDispatcher }));
+    });
+    return proxyFetch;
+}
+function getApiBaseUrl() {
+    return process.env['GITHUB_API_URL'] || 'https://api.github.com';
 }
 
 function getUserAgent() {
@@ -37388,13 +37293,6 @@ class Octokit {
   // TODO: type `octokit.auth` based on passed options.authStrategy
   auth;
 }
-
-var distSrc$1 = /*#__PURE__*/Object.freeze({
-	__proto__: null,
-	Octokit: Octokit
-});
-
-var require$$2 = /*@__PURE__*/getAugmentedNamespace(distSrc$1);
 
 const VERSION$1 = "17.0.0";
 
@@ -39818,22 +39716,6 @@ function restEndpointMethods(octokit) {
   };
 }
 restEndpointMethods.VERSION = VERSION$1;
-function legacyRestEndpointMethods(octokit) {
-  const api = endpointsToMethods(octokit);
-  return {
-    ...api,
-    rest: api
-  };
-}
-legacyRestEndpointMethods.VERSION = VERSION$1;
-
-var distSrc = /*#__PURE__*/Object.freeze({
-	__proto__: null,
-	legacyRestEndpointMethods: legacyRestEndpointMethods,
-	restEndpointMethods: restEndpointMethods
-});
-
-var require$$3 = /*@__PURE__*/getAugmentedNamespace(distSrc);
 
 // pkg/dist-src/version.js
 var VERSION = "0.0.0-development";
@@ -39947,293 +39829,9 @@ function gather(octokit, results, iterator2, mapFn) {
 }
 
 // pkg/dist-src/compose-paginate.js
-var composePaginateRest = Object.assign(paginate, {
+Object.assign(paginate, {
   iterator
 });
-
-// pkg/dist-src/generated/paginating-endpoints.js
-var paginatingEndpoints = [
-  "GET /advisories",
-  "GET /app/hook/deliveries",
-  "GET /app/installation-requests",
-  "GET /app/installations",
-  "GET /assignments/{assignment_id}/accepted_assignments",
-  "GET /classrooms",
-  "GET /classrooms/{classroom_id}/assignments",
-  "GET /enterprises/{enterprise}/code-security/configurations",
-  "GET /enterprises/{enterprise}/code-security/configurations/{configuration_id}/repositories",
-  "GET /enterprises/{enterprise}/dependabot/alerts",
-  "GET /enterprises/{enterprise}/teams",
-  "GET /enterprises/{enterprise}/teams/{enterprise-team}/memberships",
-  "GET /enterprises/{enterprise}/teams/{enterprise-team}/organizations",
-  "GET /events",
-  "GET /gists",
-  "GET /gists/public",
-  "GET /gists/starred",
-  "GET /gists/{gist_id}/comments",
-  "GET /gists/{gist_id}/commits",
-  "GET /gists/{gist_id}/forks",
-  "GET /installation/repositories",
-  "GET /issues",
-  "GET /licenses",
-  "GET /marketplace_listing/plans",
-  "GET /marketplace_listing/plans/{plan_id}/accounts",
-  "GET /marketplace_listing/stubbed/plans",
-  "GET /marketplace_listing/stubbed/plans/{plan_id}/accounts",
-  "GET /networks/{owner}/{repo}/events",
-  "GET /notifications",
-  "GET /organizations",
-  "GET /organizations/{org}/dependabot/repository-access",
-  "GET /orgs/{org}/actions/cache/usage-by-repository",
-  "GET /orgs/{org}/actions/hosted-runners",
-  "GET /orgs/{org}/actions/permissions/repositories",
-  "GET /orgs/{org}/actions/permissions/self-hosted-runners/repositories",
-  "GET /orgs/{org}/actions/runner-groups",
-  "GET /orgs/{org}/actions/runner-groups/{runner_group_id}/hosted-runners",
-  "GET /orgs/{org}/actions/runner-groups/{runner_group_id}/repositories",
-  "GET /orgs/{org}/actions/runner-groups/{runner_group_id}/runners",
-  "GET /orgs/{org}/actions/runners",
-  "GET /orgs/{org}/actions/secrets",
-  "GET /orgs/{org}/actions/secrets/{secret_name}/repositories",
-  "GET /orgs/{org}/actions/variables",
-  "GET /orgs/{org}/actions/variables/{name}/repositories",
-  "GET /orgs/{org}/attestations/repositories",
-  "GET /orgs/{org}/attestations/{subject_digest}",
-  "GET /orgs/{org}/blocks",
-  "GET /orgs/{org}/campaigns",
-  "GET /orgs/{org}/code-scanning/alerts",
-  "GET /orgs/{org}/code-security/configurations",
-  "GET /orgs/{org}/code-security/configurations/{configuration_id}/repositories",
-  "GET /orgs/{org}/codespaces",
-  "GET /orgs/{org}/codespaces/secrets",
-  "GET /orgs/{org}/codespaces/secrets/{secret_name}/repositories",
-  "GET /orgs/{org}/copilot/billing/seats",
-  "GET /orgs/{org}/copilot/metrics",
-  "GET /orgs/{org}/dependabot/alerts",
-  "GET /orgs/{org}/dependabot/secrets",
-  "GET /orgs/{org}/dependabot/secrets/{secret_name}/repositories",
-  "GET /orgs/{org}/events",
-  "GET /orgs/{org}/failed_invitations",
-  "GET /orgs/{org}/hooks",
-  "GET /orgs/{org}/hooks/{hook_id}/deliveries",
-  "GET /orgs/{org}/insights/api/route-stats/{actor_type}/{actor_id}",
-  "GET /orgs/{org}/insights/api/subject-stats",
-  "GET /orgs/{org}/insights/api/user-stats/{user_id}",
-  "GET /orgs/{org}/installations",
-  "GET /orgs/{org}/invitations",
-  "GET /orgs/{org}/invitations/{invitation_id}/teams",
-  "GET /orgs/{org}/issues",
-  "GET /orgs/{org}/members",
-  "GET /orgs/{org}/members/{username}/codespaces",
-  "GET /orgs/{org}/migrations",
-  "GET /orgs/{org}/migrations/{migration_id}/repositories",
-  "GET /orgs/{org}/organization-roles/{role_id}/teams",
-  "GET /orgs/{org}/organization-roles/{role_id}/users",
-  "GET /orgs/{org}/outside_collaborators",
-  "GET /orgs/{org}/packages",
-  "GET /orgs/{org}/packages/{package_type}/{package_name}/versions",
-  "GET /orgs/{org}/personal-access-token-requests",
-  "GET /orgs/{org}/personal-access-token-requests/{pat_request_id}/repositories",
-  "GET /orgs/{org}/personal-access-tokens",
-  "GET /orgs/{org}/personal-access-tokens/{pat_id}/repositories",
-  "GET /orgs/{org}/private-registries",
-  "GET /orgs/{org}/projects",
-  "GET /orgs/{org}/projectsV2",
-  "GET /orgs/{org}/projectsV2/{project_number}/fields",
-  "GET /orgs/{org}/projectsV2/{project_number}/items",
-  "GET /orgs/{org}/properties/values",
-  "GET /orgs/{org}/public_members",
-  "GET /orgs/{org}/repos",
-  "GET /orgs/{org}/rulesets",
-  "GET /orgs/{org}/rulesets/rule-suites",
-  "GET /orgs/{org}/rulesets/{ruleset_id}/history",
-  "GET /orgs/{org}/secret-scanning/alerts",
-  "GET /orgs/{org}/security-advisories",
-  "GET /orgs/{org}/settings/immutable-releases/repositories",
-  "GET /orgs/{org}/settings/network-configurations",
-  "GET /orgs/{org}/team/{team_slug}/copilot/metrics",
-  "GET /orgs/{org}/teams",
-  "GET /orgs/{org}/teams/{team_slug}/discussions",
-  "GET /orgs/{org}/teams/{team_slug}/discussions/{discussion_number}/comments",
-  "GET /orgs/{org}/teams/{team_slug}/discussions/{discussion_number}/comments/{comment_number}/reactions",
-  "GET /orgs/{org}/teams/{team_slug}/discussions/{discussion_number}/reactions",
-  "GET /orgs/{org}/teams/{team_slug}/invitations",
-  "GET /orgs/{org}/teams/{team_slug}/members",
-  "GET /orgs/{org}/teams/{team_slug}/projects",
-  "GET /orgs/{org}/teams/{team_slug}/repos",
-  "GET /orgs/{org}/teams/{team_slug}/teams",
-  "GET /projects/{project_id}/collaborators",
-  "GET /repos/{owner}/{repo}/actions/artifacts",
-  "GET /repos/{owner}/{repo}/actions/caches",
-  "GET /repos/{owner}/{repo}/actions/organization-secrets",
-  "GET /repos/{owner}/{repo}/actions/organization-variables",
-  "GET /repos/{owner}/{repo}/actions/runners",
-  "GET /repos/{owner}/{repo}/actions/runs",
-  "GET /repos/{owner}/{repo}/actions/runs/{run_id}/artifacts",
-  "GET /repos/{owner}/{repo}/actions/runs/{run_id}/attempts/{attempt_number}/jobs",
-  "GET /repos/{owner}/{repo}/actions/runs/{run_id}/jobs",
-  "GET /repos/{owner}/{repo}/actions/secrets",
-  "GET /repos/{owner}/{repo}/actions/variables",
-  "GET /repos/{owner}/{repo}/actions/workflows",
-  "GET /repos/{owner}/{repo}/actions/workflows/{workflow_id}/runs",
-  "GET /repos/{owner}/{repo}/activity",
-  "GET /repos/{owner}/{repo}/assignees",
-  "GET /repos/{owner}/{repo}/attestations/{subject_digest}",
-  "GET /repos/{owner}/{repo}/branches",
-  "GET /repos/{owner}/{repo}/check-runs/{check_run_id}/annotations",
-  "GET /repos/{owner}/{repo}/check-suites/{check_suite_id}/check-runs",
-  "GET /repos/{owner}/{repo}/code-scanning/alerts",
-  "GET /repos/{owner}/{repo}/code-scanning/alerts/{alert_number}/instances",
-  "GET /repos/{owner}/{repo}/code-scanning/analyses",
-  "GET /repos/{owner}/{repo}/codespaces",
-  "GET /repos/{owner}/{repo}/codespaces/devcontainers",
-  "GET /repos/{owner}/{repo}/codespaces/secrets",
-  "GET /repos/{owner}/{repo}/collaborators",
-  "GET /repos/{owner}/{repo}/comments",
-  "GET /repos/{owner}/{repo}/comments/{comment_id}/reactions",
-  "GET /repos/{owner}/{repo}/commits",
-  "GET /repos/{owner}/{repo}/commits/{commit_sha}/comments",
-  "GET /repos/{owner}/{repo}/commits/{commit_sha}/pulls",
-  "GET /repos/{owner}/{repo}/commits/{ref}/check-runs",
-  "GET /repos/{owner}/{repo}/commits/{ref}/check-suites",
-  "GET /repos/{owner}/{repo}/commits/{ref}/status",
-  "GET /repos/{owner}/{repo}/commits/{ref}/statuses",
-  "GET /repos/{owner}/{repo}/compare/{basehead}",
-  "GET /repos/{owner}/{repo}/compare/{base}...{head}",
-  "GET /repos/{owner}/{repo}/contributors",
-  "GET /repos/{owner}/{repo}/dependabot/alerts",
-  "GET /repos/{owner}/{repo}/dependabot/secrets",
-  "GET /repos/{owner}/{repo}/deployments",
-  "GET /repos/{owner}/{repo}/deployments/{deployment_id}/statuses",
-  "GET /repos/{owner}/{repo}/environments",
-  "GET /repos/{owner}/{repo}/environments/{environment_name}/deployment-branch-policies",
-  "GET /repos/{owner}/{repo}/environments/{environment_name}/deployment_protection_rules/apps",
-  "GET /repos/{owner}/{repo}/environments/{environment_name}/secrets",
-  "GET /repos/{owner}/{repo}/environments/{environment_name}/variables",
-  "GET /repos/{owner}/{repo}/events",
-  "GET /repos/{owner}/{repo}/forks",
-  "GET /repos/{owner}/{repo}/hooks",
-  "GET /repos/{owner}/{repo}/hooks/{hook_id}/deliveries",
-  "GET /repos/{owner}/{repo}/invitations",
-  "GET /repos/{owner}/{repo}/issues",
-  "GET /repos/{owner}/{repo}/issues/comments",
-  "GET /repos/{owner}/{repo}/issues/comments/{comment_id}/reactions",
-  "GET /repos/{owner}/{repo}/issues/events",
-  "GET /repos/{owner}/{repo}/issues/{issue_number}/comments",
-  "GET /repos/{owner}/{repo}/issues/{issue_number}/dependencies/blocked_by",
-  "GET /repos/{owner}/{repo}/issues/{issue_number}/dependencies/blocking",
-  "GET /repos/{owner}/{repo}/issues/{issue_number}/events",
-  "GET /repos/{owner}/{repo}/issues/{issue_number}/labels",
-  "GET /repos/{owner}/{repo}/issues/{issue_number}/reactions",
-  "GET /repos/{owner}/{repo}/issues/{issue_number}/sub_issues",
-  "GET /repos/{owner}/{repo}/issues/{issue_number}/timeline",
-  "GET /repos/{owner}/{repo}/keys",
-  "GET /repos/{owner}/{repo}/labels",
-  "GET /repos/{owner}/{repo}/milestones",
-  "GET /repos/{owner}/{repo}/milestones/{milestone_number}/labels",
-  "GET /repos/{owner}/{repo}/notifications",
-  "GET /repos/{owner}/{repo}/pages/builds",
-  "GET /repos/{owner}/{repo}/projects",
-  "GET /repos/{owner}/{repo}/pulls",
-  "GET /repos/{owner}/{repo}/pulls/comments",
-  "GET /repos/{owner}/{repo}/pulls/comments/{comment_id}/reactions",
-  "GET /repos/{owner}/{repo}/pulls/{pull_number}/comments",
-  "GET /repos/{owner}/{repo}/pulls/{pull_number}/commits",
-  "GET /repos/{owner}/{repo}/pulls/{pull_number}/files",
-  "GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews",
-  "GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews/{review_id}/comments",
-  "GET /repos/{owner}/{repo}/releases",
-  "GET /repos/{owner}/{repo}/releases/{release_id}/assets",
-  "GET /repos/{owner}/{repo}/releases/{release_id}/reactions",
-  "GET /repos/{owner}/{repo}/rules/branches/{branch}",
-  "GET /repos/{owner}/{repo}/rulesets",
-  "GET /repos/{owner}/{repo}/rulesets/rule-suites",
-  "GET /repos/{owner}/{repo}/rulesets/{ruleset_id}/history",
-  "GET /repos/{owner}/{repo}/secret-scanning/alerts",
-  "GET /repos/{owner}/{repo}/secret-scanning/alerts/{alert_number}/locations",
-  "GET /repos/{owner}/{repo}/security-advisories",
-  "GET /repos/{owner}/{repo}/stargazers",
-  "GET /repos/{owner}/{repo}/subscribers",
-  "GET /repos/{owner}/{repo}/tags",
-  "GET /repos/{owner}/{repo}/teams",
-  "GET /repos/{owner}/{repo}/topics",
-  "GET /repositories",
-  "GET /search/code",
-  "GET /search/commits",
-  "GET /search/issues",
-  "GET /search/labels",
-  "GET /search/repositories",
-  "GET /search/topics",
-  "GET /search/users",
-  "GET /teams/{team_id}/discussions",
-  "GET /teams/{team_id}/discussions/{discussion_number}/comments",
-  "GET /teams/{team_id}/discussions/{discussion_number}/comments/{comment_number}/reactions",
-  "GET /teams/{team_id}/discussions/{discussion_number}/reactions",
-  "GET /teams/{team_id}/invitations",
-  "GET /teams/{team_id}/members",
-  "GET /teams/{team_id}/projects",
-  "GET /teams/{team_id}/repos",
-  "GET /teams/{team_id}/teams",
-  "GET /user/blocks",
-  "GET /user/codespaces",
-  "GET /user/codespaces/secrets",
-  "GET /user/emails",
-  "GET /user/followers",
-  "GET /user/following",
-  "GET /user/gpg_keys",
-  "GET /user/installations",
-  "GET /user/installations/{installation_id}/repositories",
-  "GET /user/issues",
-  "GET /user/keys",
-  "GET /user/marketplace_purchases",
-  "GET /user/marketplace_purchases/stubbed",
-  "GET /user/memberships/orgs",
-  "GET /user/migrations",
-  "GET /user/migrations/{migration_id}/repositories",
-  "GET /user/orgs",
-  "GET /user/packages",
-  "GET /user/packages/{package_type}/{package_name}/versions",
-  "GET /user/public_emails",
-  "GET /user/repos",
-  "GET /user/repository_invitations",
-  "GET /user/social_accounts",
-  "GET /user/ssh_signing_keys",
-  "GET /user/starred",
-  "GET /user/subscriptions",
-  "GET /user/teams",
-  "GET /users",
-  "GET /users/{username}/attestations/{subject_digest}",
-  "GET /users/{username}/events",
-  "GET /users/{username}/events/orgs/{org}",
-  "GET /users/{username}/events/public",
-  "GET /users/{username}/followers",
-  "GET /users/{username}/following",
-  "GET /users/{username}/gists",
-  "GET /users/{username}/gpg_keys",
-  "GET /users/{username}/keys",
-  "GET /users/{username}/orgs",
-  "GET /users/{username}/packages",
-  "GET /users/{username}/projects",
-  "GET /users/{username}/projectsV2",
-  "GET /users/{username}/projectsV2/{project_number}/fields",
-  "GET /users/{username}/projectsV2/{project_number}/items",
-  "GET /users/{username}/received_events",
-  "GET /users/{username}/received_events/public",
-  "GET /users/{username}/repos",
-  "GET /users/{username}/social_accounts",
-  "GET /users/{username}/ssh_signing_keys",
-  "GET /users/{username}/starred",
-  "GET /users/{username}/subscriptions"
-];
-
-// pkg/dist-src/paginating-endpoints.js
-function isPaginatingEndpoint(arg) {
-  if (typeof arg === "string") {
-    return paginatingEndpoints.includes(arg);
-  } else {
-    return false;
-  }
-}
 
 // pkg/dist-src/index.js
 function paginateRest(octokit) {
@@ -40245,153 +39843,43 @@ function paginateRest(octokit) {
 }
 paginateRest.VERSION = VERSION;
 
-var distBundle = /*#__PURE__*/Object.freeze({
-	__proto__: null,
-	composePaginateRest: composePaginateRest,
-	isPaginatingEndpoint: isPaginatingEndpoint,
-	paginateRest: paginateRest,
-	paginatingEndpoints: paginatingEndpoints
-});
-
-var require$$4 = /*@__PURE__*/getAugmentedNamespace(distBundle);
-
-var hasRequiredUtils$3;
-
-function requireUtils$3 () {
-	if (hasRequiredUtils$3) return utils$5;
-	hasRequiredUtils$3 = 1;
-	(function (exports$1) {
-		var __createBinding = (utils$5 && utils$5.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-		    if (k2 === undefined) k2 = k;
-		    var desc = Object.getOwnPropertyDescriptor(m, k);
-		    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-		      desc = { enumerable: true, get: function() { return m[k]; } };
-		    }
-		    Object.defineProperty(o, k2, desc);
-		}) : (function(o, m, k, k2) {
-		    if (k2 === undefined) k2 = k;
-		    o[k2] = m[k];
-		}));
-		var __setModuleDefault = (utils$5 && utils$5.__setModuleDefault) || (Object.create ? (function(o, v) {
-		    Object.defineProperty(o, "default", { enumerable: true, value: v });
-		}) : function(o, v) {
-		    o["default"] = v;
-		});
-		var __importStar = (utils$5 && utils$5.__importStar) || (function () {
-		    var ownKeys = function(o) {
-		        ownKeys = Object.getOwnPropertyNames || function (o) {
-		            var ar = [];
-		            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-		            return ar;
-		        };
-		        return ownKeys(o);
-		    };
-		    return function (mod) {
-		        if (mod && mod.__esModule) return mod;
-		        var result = {};
-		        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-		        __setModuleDefault(result, mod);
-		        return result;
-		    };
-		})();
-		Object.defineProperty(exports$1, "__esModule", { value: true });
-		exports$1.GitHub = exports$1.defaults = exports$1.context = void 0;
-		exports$1.getOctokitOptions = getOctokitOptions;
-		const Context = __importStar(requireContext());
-		const Utils = __importStar(requireUtils$4());
-		// octokit + plugins
-		const core_1 = require$$2;
-		const plugin_rest_endpoint_methods_1 = require$$3;
-		const plugin_paginate_rest_1 = require$$4;
-		exports$1.context = new Context.Context();
-		const baseUrl = Utils.getApiBaseUrl();
-		exports$1.defaults = {
-		    baseUrl,
-		    request: {
-		        agent: Utils.getProxyAgent(baseUrl),
-		        fetch: Utils.getProxyFetch(baseUrl)
-		    }
-		};
-		exports$1.GitHub = core_1.Octokit.plugin(plugin_rest_endpoint_methods_1.restEndpointMethods, plugin_paginate_rest_1.paginateRest).defaults(exports$1.defaults);
-		/**
-		 * Convience function to correctly format Octokit Options to pass into the constructor.
-		 *
-		 * @param     token    the repo PAT or GITHUB_TOKEN
-		 * @param     options  other options to set
-		 */
-		function getOctokitOptions(token, options) {
-		    const opts = Object.assign({}, options || {}); // Shallow clone - don't mutate the object provided by the caller
-		    // Auth
-		    const auth = Utils.getAuthString(token, opts);
-		    if (auth) {
-		        opts.auth = auth;
-		    }
-		    return opts;
-		}
-		
-	} (utils$5));
-	return utils$5;
+new Context();
+const baseUrl = getApiBaseUrl();
+const defaults = {
+    baseUrl,
+    request: {
+        agent: getProxyAgent(baseUrl),
+        fetch: getProxyFetch(baseUrl)
+    }
+};
+const GitHub = Octokit.plugin(restEndpointMethods, paginateRest).defaults(defaults);
+/**
+ * Convience function to correctly format Octokit Options to pass into the constructor.
+ *
+ * @param     token    the repo PAT or GITHUB_TOKEN
+ * @param     options  other options to set
+ */
+function getOctokitOptions(token, options) {
+    const opts = Object.assign({}, {}); // Shallow clone - don't mutate the object provided by the caller
+    // Auth
+    const auth = getAuthString(token, opts);
+    if (auth) {
+        opts.auth = auth;
+    }
+    return opts;
 }
 
-var hasRequiredGithub;
-
-function requireGithub () {
-	if (hasRequiredGithub) return github;
-	hasRequiredGithub = 1;
-	var __createBinding = (github && github.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-	    if (k2 === undefined) k2 = k;
-	    var desc = Object.getOwnPropertyDescriptor(m, k);
-	    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-	      desc = { enumerable: true, get: function() { return m[k]; } };
-	    }
-	    Object.defineProperty(o, k2, desc);
-	}) : (function(o, m, k, k2) {
-	    if (k2 === undefined) k2 = k;
-	    o[k2] = m[k];
-	}));
-	var __setModuleDefault = (github && github.__setModuleDefault) || (Object.create ? (function(o, v) {
-	    Object.defineProperty(o, "default", { enumerable: true, value: v });
-	}) : function(o, v) {
-	    o["default"] = v;
-	});
-	var __importStar = (github && github.__importStar) || (function () {
-	    var ownKeys = function(o) {
-	        ownKeys = Object.getOwnPropertyNames || function (o) {
-	            var ar = [];
-	            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-	            return ar;
-	        };
-	        return ownKeys(o);
-	    };
-	    return function (mod) {
-	        if (mod && mod.__esModule) return mod;
-	        var result = {};
-	        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-	        __setModuleDefault(result, mod);
-	        return result;
-	    };
-	})();
-	Object.defineProperty(github, "__esModule", { value: true });
-	github.context = void 0;
-	github.getOctokit = getOctokit;
-	const Context = __importStar(requireContext());
-	const utils_1 = requireUtils$3();
-	github.context = new Context.Context();
-	/**
-	 * Returns a hydrated octokit ready to use for GitHub Actions
-	 *
-	 * @param     token    the repo PAT or GITHUB_TOKEN
-	 * @param     options  other options to set
-	 */
-	function getOctokit(token, options, ...additionalPlugins) {
-	    const GitHubWithPlugins = utils_1.GitHub.plugin(...additionalPlugins);
-	    return new GitHubWithPlugins((0, utils_1.getOctokitOptions)(token, options));
-	}
-	
-	return github;
+const context = new Context();
+/**
+ * Returns a hydrated octokit ready to use for GitHub Actions
+ *
+ * @param     token    the repo PAT or GITHUB_TOKEN
+ * @param     options  other options to set
+ */
+function getOctokit(token, options, ...additionalPlugins) {
+    const GitHubWithPlugins = GitHub.plugin(...additionalPlugins);
+    return new GitHubWithPlugins(getOctokitOptions(token));
 }
-
-var githubExports = requireGithub();
 
 var core = {};
 
@@ -40486,7 +39974,7 @@ function requireCommand () {
 	Object.defineProperty(command, "__esModule", { value: true });
 	command.issueCommand = issueCommand;
 	command.issue = issue;
-	const os = __importStar(require$$0);
+	const os = __importStar(require$$0$9);
 	const utils_1 = requireUtils$2();
 	/**
 	 * Issues a command to the GitHub Actions runner
@@ -40626,9 +40114,9 @@ function requireFileCommand () {
 	fileCommand.prepareKeyValueMessage = prepareKeyValueMessage;
 	// We use any as a valid input type
 	/* eslint-disable @typescript-eslint/no-explicit-any */
-	const crypto = __importStar(require$$0$9);
-	const fs = __importStar(require$$1);
-	const os = __importStar(require$$0);
+	const crypto = __importStar(require$$0$a);
+	const fs = __importStar(require$$1$6);
+	const os = __importStar(require$$0$9);
 	const utils_1 = requireUtils$2();
 	function issueFileCommand(command, message) {
 	    const filePath = process.env[`GITHUB_${command}`];
@@ -40661,6 +40149,855 @@ function requireFileCommand () {
 }
 
 var oidcUtils = {};
+
+var lib = {};
+
+var proxy = {};
+
+var hasRequiredProxy;
+
+function requireProxy () {
+	if (hasRequiredProxy) return proxy;
+	hasRequiredProxy = 1;
+	Object.defineProperty(proxy, "__esModule", { value: true });
+	proxy.getProxyUrl = getProxyUrl;
+	proxy.checkBypass = checkBypass;
+	function getProxyUrl(reqUrl) {
+	    const usingSsl = reqUrl.protocol === 'https:';
+	    if (checkBypass(reqUrl)) {
+	        return undefined;
+	    }
+	    const proxyVar = (() => {
+	        if (usingSsl) {
+	            return process.env['https_proxy'] || process.env['HTTPS_PROXY'];
+	        }
+	        else {
+	            return process.env['http_proxy'] || process.env['HTTP_PROXY'];
+	        }
+	    })();
+	    if (proxyVar) {
+	        try {
+	            return new DecodedURL(proxyVar);
+	        }
+	        catch (_a) {
+	            if (!proxyVar.startsWith('http://') && !proxyVar.startsWith('https://'))
+	                return new DecodedURL(`http://${proxyVar}`);
+	        }
+	    }
+	    else {
+	        return undefined;
+	    }
+	}
+	function checkBypass(reqUrl) {
+	    if (!reqUrl.hostname) {
+	        return false;
+	    }
+	    const reqHost = reqUrl.hostname;
+	    if (isLoopbackAddress(reqHost)) {
+	        return true;
+	    }
+	    const noProxy = process.env['no_proxy'] || process.env['NO_PROXY'] || '';
+	    if (!noProxy) {
+	        return false;
+	    }
+	    // Determine the request port
+	    let reqPort;
+	    if (reqUrl.port) {
+	        reqPort = Number(reqUrl.port);
+	    }
+	    else if (reqUrl.protocol === 'http:') {
+	        reqPort = 80;
+	    }
+	    else if (reqUrl.protocol === 'https:') {
+	        reqPort = 443;
+	    }
+	    // Format the request hostname and hostname with port
+	    const upperReqHosts = [reqUrl.hostname.toUpperCase()];
+	    if (typeof reqPort === 'number') {
+	        upperReqHosts.push(`${upperReqHosts[0]}:${reqPort}`);
+	    }
+	    // Compare request host against noproxy
+	    for (const upperNoProxyItem of noProxy
+	        .split(',')
+	        .map(x => x.trim().toUpperCase())
+	        .filter(x => x)) {
+	        if (upperNoProxyItem === '*' ||
+	            upperReqHosts.some(x => x === upperNoProxyItem ||
+	                x.endsWith(`.${upperNoProxyItem}`) ||
+	                (upperNoProxyItem.startsWith('.') &&
+	                    x.endsWith(`${upperNoProxyItem}`)))) {
+	            return true;
+	        }
+	    }
+	    return false;
+	}
+	function isLoopbackAddress(host) {
+	    const hostLower = host.toLowerCase();
+	    return (hostLower === 'localhost' ||
+	        hostLower.startsWith('127.') ||
+	        hostLower.startsWith('[::1]') ||
+	        hostLower.startsWith('[0:0:0:0:0:0:0:1]'));
+	}
+	class DecodedURL extends URL {
+	    constructor(url, base) {
+	        super(url, base);
+	        this._decodedUsername = decodeURIComponent(super.username);
+	        this._decodedPassword = decodeURIComponent(super.password);
+	    }
+	    get username() {
+	        return this._decodedUsername;
+	    }
+	    get password() {
+	        return this._decodedPassword;
+	    }
+	}
+	
+	return proxy;
+}
+
+var hasRequiredLib;
+
+function requireLib () {
+	if (hasRequiredLib) return lib;
+	hasRequiredLib = 1;
+	/* eslint-disable @typescript-eslint/no-explicit-any */
+	var __createBinding = (lib && lib.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+	    if (k2 === undefined) k2 = k;
+	    var desc = Object.getOwnPropertyDescriptor(m, k);
+	    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+	      desc = { enumerable: true, get: function() { return m[k]; } };
+	    }
+	    Object.defineProperty(o, k2, desc);
+	}) : (function(o, m, k, k2) {
+	    if (k2 === undefined) k2 = k;
+	    o[k2] = m[k];
+	}));
+	var __setModuleDefault = (lib && lib.__setModuleDefault) || (Object.create ? (function(o, v) {
+	    Object.defineProperty(o, "default", { enumerable: true, value: v });
+	}) : function(o, v) {
+	    o["default"] = v;
+	});
+	var __importStar = (lib && lib.__importStar) || (function () {
+	    var ownKeys = function(o) {
+	        ownKeys = Object.getOwnPropertyNames || function (o) {
+	            var ar = [];
+	            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+	            return ar;
+	        };
+	        return ownKeys(o);
+	    };
+	    return function (mod) {
+	        if (mod && mod.__esModule) return mod;
+	        var result = {};
+	        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+	        __setModuleDefault(result, mod);
+	        return result;
+	    };
+	})();
+	var __awaiter = (lib && lib.__awaiter) || function (thisArg, _arguments, P, generator) {
+	    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+	    return new (P || (P = Promise))(function (resolve, reject) {
+	        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+	        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+	        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+	        step((generator = generator.apply(thisArg, _arguments || [])).next());
+	    });
+	};
+	Object.defineProperty(lib, "__esModule", { value: true });
+	lib.HttpClient = lib.HttpClientResponse = lib.HttpClientError = lib.MediaTypes = lib.Headers = lib.HttpCodes = void 0;
+	lib.getProxyUrl = getProxyUrl;
+	lib.isHttps = isHttps;
+	const http = __importStar(require$$0);
+	const https = __importStar(require$$1);
+	const pm = __importStar(requireProxy());
+	const tunnel = __importStar(requireTunnel());
+	const undici_1 = requireUndici();
+	var HttpCodes;
+	(function (HttpCodes) {
+	    HttpCodes[HttpCodes["OK"] = 200] = "OK";
+	    HttpCodes[HttpCodes["MultipleChoices"] = 300] = "MultipleChoices";
+	    HttpCodes[HttpCodes["MovedPermanently"] = 301] = "MovedPermanently";
+	    HttpCodes[HttpCodes["ResourceMoved"] = 302] = "ResourceMoved";
+	    HttpCodes[HttpCodes["SeeOther"] = 303] = "SeeOther";
+	    HttpCodes[HttpCodes["NotModified"] = 304] = "NotModified";
+	    HttpCodes[HttpCodes["UseProxy"] = 305] = "UseProxy";
+	    HttpCodes[HttpCodes["SwitchProxy"] = 306] = "SwitchProxy";
+	    HttpCodes[HttpCodes["TemporaryRedirect"] = 307] = "TemporaryRedirect";
+	    HttpCodes[HttpCodes["PermanentRedirect"] = 308] = "PermanentRedirect";
+	    HttpCodes[HttpCodes["BadRequest"] = 400] = "BadRequest";
+	    HttpCodes[HttpCodes["Unauthorized"] = 401] = "Unauthorized";
+	    HttpCodes[HttpCodes["PaymentRequired"] = 402] = "PaymentRequired";
+	    HttpCodes[HttpCodes["Forbidden"] = 403] = "Forbidden";
+	    HttpCodes[HttpCodes["NotFound"] = 404] = "NotFound";
+	    HttpCodes[HttpCodes["MethodNotAllowed"] = 405] = "MethodNotAllowed";
+	    HttpCodes[HttpCodes["NotAcceptable"] = 406] = "NotAcceptable";
+	    HttpCodes[HttpCodes["ProxyAuthenticationRequired"] = 407] = "ProxyAuthenticationRequired";
+	    HttpCodes[HttpCodes["RequestTimeout"] = 408] = "RequestTimeout";
+	    HttpCodes[HttpCodes["Conflict"] = 409] = "Conflict";
+	    HttpCodes[HttpCodes["Gone"] = 410] = "Gone";
+	    HttpCodes[HttpCodes["TooManyRequests"] = 429] = "TooManyRequests";
+	    HttpCodes[HttpCodes["InternalServerError"] = 500] = "InternalServerError";
+	    HttpCodes[HttpCodes["NotImplemented"] = 501] = "NotImplemented";
+	    HttpCodes[HttpCodes["BadGateway"] = 502] = "BadGateway";
+	    HttpCodes[HttpCodes["ServiceUnavailable"] = 503] = "ServiceUnavailable";
+	    HttpCodes[HttpCodes["GatewayTimeout"] = 504] = "GatewayTimeout";
+	})(HttpCodes || (lib.HttpCodes = HttpCodes = {}));
+	var Headers;
+	(function (Headers) {
+	    Headers["Accept"] = "accept";
+	    Headers["ContentType"] = "content-type";
+	})(Headers || (lib.Headers = Headers = {}));
+	var MediaTypes;
+	(function (MediaTypes) {
+	    MediaTypes["ApplicationJson"] = "application/json";
+	})(MediaTypes || (lib.MediaTypes = MediaTypes = {}));
+	/**
+	 * Returns the proxy URL, depending upon the supplied url and proxy environment variables.
+	 * @param serverUrl  The server URL where the request will be sent. For example, https://api.github.com
+	 */
+	function getProxyUrl(serverUrl) {
+	    const proxyUrl = pm.getProxyUrl(new URL(serverUrl));
+	    return proxyUrl ? proxyUrl.href : '';
+	}
+	const HttpRedirectCodes = [
+	    HttpCodes.MovedPermanently,
+	    HttpCodes.ResourceMoved,
+	    HttpCodes.SeeOther,
+	    HttpCodes.TemporaryRedirect,
+	    HttpCodes.PermanentRedirect
+	];
+	const HttpResponseRetryCodes = [
+	    HttpCodes.BadGateway,
+	    HttpCodes.ServiceUnavailable,
+	    HttpCodes.GatewayTimeout
+	];
+	const RetryableHttpVerbs = ['OPTIONS', 'GET', 'DELETE', 'HEAD'];
+	const ExponentialBackoffCeiling = 10;
+	const ExponentialBackoffTimeSlice = 5;
+	class HttpClientError extends Error {
+	    constructor(message, statusCode) {
+	        super(message);
+	        this.name = 'HttpClientError';
+	        this.statusCode = statusCode;
+	        Object.setPrototypeOf(this, HttpClientError.prototype);
+	    }
+	}
+	lib.HttpClientError = HttpClientError;
+	class HttpClientResponse {
+	    constructor(message) {
+	        this.message = message;
+	    }
+	    readBody() {
+	        return __awaiter(this, void 0, void 0, function* () {
+	            return new Promise((resolve) => __awaiter(this, void 0, void 0, function* () {
+	                let output = Buffer.alloc(0);
+	                this.message.on('data', (chunk) => {
+	                    output = Buffer.concat([output, chunk]);
+	                });
+	                this.message.on('end', () => {
+	                    resolve(output.toString());
+	                });
+	            }));
+	        });
+	    }
+	    readBodyBuffer() {
+	        return __awaiter(this, void 0, void 0, function* () {
+	            return new Promise((resolve) => __awaiter(this, void 0, void 0, function* () {
+	                const chunks = [];
+	                this.message.on('data', (chunk) => {
+	                    chunks.push(chunk);
+	                });
+	                this.message.on('end', () => {
+	                    resolve(Buffer.concat(chunks));
+	                });
+	            }));
+	        });
+	    }
+	}
+	lib.HttpClientResponse = HttpClientResponse;
+	function isHttps(requestUrl) {
+	    const parsedUrl = new URL(requestUrl);
+	    return parsedUrl.protocol === 'https:';
+	}
+	class HttpClient {
+	    constructor(userAgent, handlers, requestOptions) {
+	        this._ignoreSslError = false;
+	        this._allowRedirects = true;
+	        this._allowRedirectDowngrade = false;
+	        this._maxRedirects = 50;
+	        this._allowRetries = false;
+	        this._maxRetries = 1;
+	        this._keepAlive = false;
+	        this._disposed = false;
+	        this.userAgent = this._getUserAgentWithOrchestrationId(userAgent);
+	        this.handlers = handlers || [];
+	        this.requestOptions = requestOptions;
+	        if (requestOptions) {
+	            if (requestOptions.ignoreSslError != null) {
+	                this._ignoreSslError = requestOptions.ignoreSslError;
+	            }
+	            this._socketTimeout = requestOptions.socketTimeout;
+	            if (requestOptions.allowRedirects != null) {
+	                this._allowRedirects = requestOptions.allowRedirects;
+	            }
+	            if (requestOptions.allowRedirectDowngrade != null) {
+	                this._allowRedirectDowngrade = requestOptions.allowRedirectDowngrade;
+	            }
+	            if (requestOptions.maxRedirects != null) {
+	                this._maxRedirects = Math.max(requestOptions.maxRedirects, 0);
+	            }
+	            if (requestOptions.keepAlive != null) {
+	                this._keepAlive = requestOptions.keepAlive;
+	            }
+	            if (requestOptions.allowRetries != null) {
+	                this._allowRetries = requestOptions.allowRetries;
+	            }
+	            if (requestOptions.maxRetries != null) {
+	                this._maxRetries = requestOptions.maxRetries;
+	            }
+	        }
+	    }
+	    options(requestUrl, additionalHeaders) {
+	        return __awaiter(this, void 0, void 0, function* () {
+	            return this.request('OPTIONS', requestUrl, null, additionalHeaders || {});
+	        });
+	    }
+	    get(requestUrl, additionalHeaders) {
+	        return __awaiter(this, void 0, void 0, function* () {
+	            return this.request('GET', requestUrl, null, additionalHeaders || {});
+	        });
+	    }
+	    del(requestUrl, additionalHeaders) {
+	        return __awaiter(this, void 0, void 0, function* () {
+	            return this.request('DELETE', requestUrl, null, additionalHeaders || {});
+	        });
+	    }
+	    post(requestUrl, data, additionalHeaders) {
+	        return __awaiter(this, void 0, void 0, function* () {
+	            return this.request('POST', requestUrl, data, additionalHeaders || {});
+	        });
+	    }
+	    patch(requestUrl, data, additionalHeaders) {
+	        return __awaiter(this, void 0, void 0, function* () {
+	            return this.request('PATCH', requestUrl, data, additionalHeaders || {});
+	        });
+	    }
+	    put(requestUrl, data, additionalHeaders) {
+	        return __awaiter(this, void 0, void 0, function* () {
+	            return this.request('PUT', requestUrl, data, additionalHeaders || {});
+	        });
+	    }
+	    head(requestUrl, additionalHeaders) {
+	        return __awaiter(this, void 0, void 0, function* () {
+	            return this.request('HEAD', requestUrl, null, additionalHeaders || {});
+	        });
+	    }
+	    sendStream(verb, requestUrl, stream, additionalHeaders) {
+	        return __awaiter(this, void 0, void 0, function* () {
+	            return this.request(verb, requestUrl, stream, additionalHeaders);
+	        });
+	    }
+	    /**
+	     * Gets a typed object from an endpoint
+	     * Be aware that not found returns a null.  Other errors (4xx, 5xx) reject the promise
+	     */
+	    getJson(requestUrl_1) {
+	        return __awaiter(this, arguments, void 0, function* (requestUrl, additionalHeaders = {}) {
+	            additionalHeaders[Headers.Accept] = this._getExistingOrDefaultHeader(additionalHeaders, Headers.Accept, MediaTypes.ApplicationJson);
+	            const res = yield this.get(requestUrl, additionalHeaders);
+	            return this._processResponse(res, this.requestOptions);
+	        });
+	    }
+	    postJson(requestUrl_1, obj_1) {
+	        return __awaiter(this, arguments, void 0, function* (requestUrl, obj, additionalHeaders = {}) {
+	            const data = JSON.stringify(obj, null, 2);
+	            additionalHeaders[Headers.Accept] = this._getExistingOrDefaultHeader(additionalHeaders, Headers.Accept, MediaTypes.ApplicationJson);
+	            additionalHeaders[Headers.ContentType] =
+	                this._getExistingOrDefaultContentTypeHeader(additionalHeaders, MediaTypes.ApplicationJson);
+	            const res = yield this.post(requestUrl, data, additionalHeaders);
+	            return this._processResponse(res, this.requestOptions);
+	        });
+	    }
+	    putJson(requestUrl_1, obj_1) {
+	        return __awaiter(this, arguments, void 0, function* (requestUrl, obj, additionalHeaders = {}) {
+	            const data = JSON.stringify(obj, null, 2);
+	            additionalHeaders[Headers.Accept] = this._getExistingOrDefaultHeader(additionalHeaders, Headers.Accept, MediaTypes.ApplicationJson);
+	            additionalHeaders[Headers.ContentType] =
+	                this._getExistingOrDefaultContentTypeHeader(additionalHeaders, MediaTypes.ApplicationJson);
+	            const res = yield this.put(requestUrl, data, additionalHeaders);
+	            return this._processResponse(res, this.requestOptions);
+	        });
+	    }
+	    patchJson(requestUrl_1, obj_1) {
+	        return __awaiter(this, arguments, void 0, function* (requestUrl, obj, additionalHeaders = {}) {
+	            const data = JSON.stringify(obj, null, 2);
+	            additionalHeaders[Headers.Accept] = this._getExistingOrDefaultHeader(additionalHeaders, Headers.Accept, MediaTypes.ApplicationJson);
+	            additionalHeaders[Headers.ContentType] =
+	                this._getExistingOrDefaultContentTypeHeader(additionalHeaders, MediaTypes.ApplicationJson);
+	            const res = yield this.patch(requestUrl, data, additionalHeaders);
+	            return this._processResponse(res, this.requestOptions);
+	        });
+	    }
+	    /**
+	     * Makes a raw http request.
+	     * All other methods such as get, post, patch, and request ultimately call this.
+	     * Prefer get, del, post and patch
+	     */
+	    request(verb, requestUrl, data, headers) {
+	        return __awaiter(this, void 0, void 0, function* () {
+	            if (this._disposed) {
+	                throw new Error('Client has already been disposed.');
+	            }
+	            const parsedUrl = new URL(requestUrl);
+	            let info = this._prepareRequest(verb, parsedUrl, headers);
+	            // Only perform retries on reads since writes may not be idempotent.
+	            const maxTries = this._allowRetries && RetryableHttpVerbs.includes(verb)
+	                ? this._maxRetries + 1
+	                : 1;
+	            let numTries = 0;
+	            let response;
+	            do {
+	                response = yield this.requestRaw(info, data);
+	                // Check if it's an authentication challenge
+	                if (response &&
+	                    response.message &&
+	                    response.message.statusCode === HttpCodes.Unauthorized) {
+	                    let authenticationHandler;
+	                    for (const handler of this.handlers) {
+	                        if (handler.canHandleAuthentication(response)) {
+	                            authenticationHandler = handler;
+	                            break;
+	                        }
+	                    }
+	                    if (authenticationHandler) {
+	                        return authenticationHandler.handleAuthentication(this, info, data);
+	                    }
+	                    else {
+	                        // We have received an unauthorized response but have no handlers to handle it.
+	                        // Let the response return to the caller.
+	                        return response;
+	                    }
+	                }
+	                let redirectsRemaining = this._maxRedirects;
+	                while (response.message.statusCode &&
+	                    HttpRedirectCodes.includes(response.message.statusCode) &&
+	                    this._allowRedirects &&
+	                    redirectsRemaining > 0) {
+	                    const redirectUrl = response.message.headers['location'];
+	                    if (!redirectUrl) {
+	                        // if there's no location to redirect to, we won't
+	                        break;
+	                    }
+	                    const parsedRedirectUrl = new URL(redirectUrl);
+	                    if (parsedUrl.protocol === 'https:' &&
+	                        parsedUrl.protocol !== parsedRedirectUrl.protocol &&
+	                        !this._allowRedirectDowngrade) {
+	                        throw new Error('Redirect from HTTPS to HTTP protocol. This downgrade is not allowed for security reasons. If you want to allow this behavior, set the allowRedirectDowngrade option to true.');
+	                    }
+	                    // we need to finish reading the response before reassigning response
+	                    // which will leak the open socket.
+	                    yield response.readBody();
+	                    // strip authorization header if redirected to a different hostname
+	                    if (parsedRedirectUrl.hostname !== parsedUrl.hostname) {
+	                        for (const header in headers) {
+	                            // header names are case insensitive
+	                            if (header.toLowerCase() === 'authorization') {
+	                                delete headers[header];
+	                            }
+	                        }
+	                    }
+	                    // let's make the request with the new redirectUrl
+	                    info = this._prepareRequest(verb, parsedRedirectUrl, headers);
+	                    response = yield this.requestRaw(info, data);
+	                    redirectsRemaining--;
+	                }
+	                if (!response.message.statusCode ||
+	                    !HttpResponseRetryCodes.includes(response.message.statusCode)) {
+	                    // If not a retry code, return immediately instead of retrying
+	                    return response;
+	                }
+	                numTries += 1;
+	                if (numTries < maxTries) {
+	                    yield response.readBody();
+	                    yield this._performExponentialBackoff(numTries);
+	                }
+	            } while (numTries < maxTries);
+	            return response;
+	        });
+	    }
+	    /**
+	     * Needs to be called if keepAlive is set to true in request options.
+	     */
+	    dispose() {
+	        if (this._agent) {
+	            this._agent.destroy();
+	        }
+	        this._disposed = true;
+	    }
+	    /**
+	     * Raw request.
+	     * @param info
+	     * @param data
+	     */
+	    requestRaw(info, data) {
+	        return __awaiter(this, void 0, void 0, function* () {
+	            return new Promise((resolve, reject) => {
+	                function callbackForResult(err, res) {
+	                    if (err) {
+	                        reject(err);
+	                    }
+	                    else if (!res) {
+	                        // If `err` is not passed, then `res` must be passed.
+	                        reject(new Error('Unknown error'));
+	                    }
+	                    else {
+	                        resolve(res);
+	                    }
+	                }
+	                this.requestRawWithCallback(info, data, callbackForResult);
+	            });
+	        });
+	    }
+	    /**
+	     * Raw request with callback.
+	     * @param info
+	     * @param data
+	     * @param onResult
+	     */
+	    requestRawWithCallback(info, data, onResult) {
+	        if (typeof data === 'string') {
+	            if (!info.options.headers) {
+	                info.options.headers = {};
+	            }
+	            info.options.headers['Content-Length'] = Buffer.byteLength(data, 'utf8');
+	        }
+	        let callbackCalled = false;
+	        function handleResult(err, res) {
+	            if (!callbackCalled) {
+	                callbackCalled = true;
+	                onResult(err, res);
+	            }
+	        }
+	        const req = info.httpModule.request(info.options, (msg) => {
+	            const res = new HttpClientResponse(msg);
+	            handleResult(undefined, res);
+	        });
+	        let socket;
+	        req.on('socket', sock => {
+	            socket = sock;
+	        });
+	        // If we ever get disconnected, we want the socket to timeout eventually
+	        req.setTimeout(this._socketTimeout || 3 * 60000, () => {
+	            if (socket) {
+	                socket.end();
+	            }
+	            handleResult(new Error(`Request timeout: ${info.options.path}`));
+	        });
+	        req.on('error', function (err) {
+	            // err has statusCode property
+	            // res should have headers
+	            handleResult(err);
+	        });
+	        if (data && typeof data === 'string') {
+	            req.write(data, 'utf8');
+	        }
+	        if (data && typeof data !== 'string') {
+	            data.on('close', function () {
+	                req.end();
+	            });
+	            data.pipe(req);
+	        }
+	        else {
+	            req.end();
+	        }
+	    }
+	    /**
+	     * Gets an http agent. This function is useful when you need an http agent that handles
+	     * routing through a proxy server - depending upon the url and proxy environment variables.
+	     * @param serverUrl  The server URL where the request will be sent. For example, https://api.github.com
+	     */
+	    getAgent(serverUrl) {
+	        const parsedUrl = new URL(serverUrl);
+	        return this._getAgent(parsedUrl);
+	    }
+	    getAgentDispatcher(serverUrl) {
+	        const parsedUrl = new URL(serverUrl);
+	        const proxyUrl = pm.getProxyUrl(parsedUrl);
+	        const useProxy = proxyUrl && proxyUrl.hostname;
+	        if (!useProxy) {
+	            return;
+	        }
+	        return this._getProxyAgentDispatcher(parsedUrl, proxyUrl);
+	    }
+	    _prepareRequest(method, requestUrl, headers) {
+	        const info = {};
+	        info.parsedUrl = requestUrl;
+	        const usingSsl = info.parsedUrl.protocol === 'https:';
+	        info.httpModule = usingSsl ? https : http;
+	        const defaultPort = usingSsl ? 443 : 80;
+	        info.options = {};
+	        info.options.host = info.parsedUrl.hostname;
+	        info.options.port = info.parsedUrl.port
+	            ? parseInt(info.parsedUrl.port)
+	            : defaultPort;
+	        info.options.path =
+	            (info.parsedUrl.pathname || '') + (info.parsedUrl.search || '');
+	        info.options.method = method;
+	        info.options.headers = this._mergeHeaders(headers);
+	        if (this.userAgent != null) {
+	            info.options.headers['user-agent'] = this.userAgent;
+	        }
+	        info.options.agent = this._getAgent(info.parsedUrl);
+	        // gives handlers an opportunity to participate
+	        if (this.handlers) {
+	            for (const handler of this.handlers) {
+	                handler.prepareRequest(info.options);
+	            }
+	        }
+	        return info;
+	    }
+	    _mergeHeaders(headers) {
+	        if (this.requestOptions && this.requestOptions.headers) {
+	            return Object.assign({}, lowercaseKeys(this.requestOptions.headers), lowercaseKeys(headers || {}));
+	        }
+	        return lowercaseKeys(headers || {});
+	    }
+	    /**
+	     * Gets an existing header value or returns a default.
+	     * Handles converting number header values to strings since HTTP headers must be strings.
+	     * Note: This returns string | string[] since some headers can have multiple values.
+	     * For headers that must always be a single string (like Content-Type), use the
+	     * specialized _getExistingOrDefaultContentTypeHeader method instead.
+	     */
+	    _getExistingOrDefaultHeader(additionalHeaders, header, _default) {
+	        let clientHeader;
+	        if (this.requestOptions && this.requestOptions.headers) {
+	            const headerValue = lowercaseKeys(this.requestOptions.headers)[header];
+	            if (headerValue) {
+	                clientHeader =
+	                    typeof headerValue === 'number' ? headerValue.toString() : headerValue;
+	            }
+	        }
+	        const additionalValue = additionalHeaders[header];
+	        if (additionalValue !== undefined) {
+	            return typeof additionalValue === 'number'
+	                ? additionalValue.toString()
+	                : additionalValue;
+	        }
+	        if (clientHeader !== undefined) {
+	            return clientHeader;
+	        }
+	        return _default;
+	    }
+	    /**
+	     * Specialized version of _getExistingOrDefaultHeader for Content-Type header.
+	     * Always returns a single string (not an array) since Content-Type should be a single value.
+	     * Converts arrays to comma-separated strings and numbers to strings to ensure type safety.
+	     * This was split from _getExistingOrDefaultHeader to provide stricter typing for callers
+	     * that assign the result to places expecting a string (e.g., additionalHeaders[Headers.ContentType]).
+	     */
+	    _getExistingOrDefaultContentTypeHeader(additionalHeaders, _default) {
+	        let clientHeader;
+	        if (this.requestOptions && this.requestOptions.headers) {
+	            const headerValue = lowercaseKeys(this.requestOptions.headers)[Headers.ContentType];
+	            if (headerValue) {
+	                if (typeof headerValue === 'number') {
+	                    clientHeader = String(headerValue);
+	                }
+	                else if (Array.isArray(headerValue)) {
+	                    clientHeader = headerValue.join(', ');
+	                }
+	                else {
+	                    clientHeader = headerValue;
+	                }
+	            }
+	        }
+	        const additionalValue = additionalHeaders[Headers.ContentType];
+	        // Return the first non-undefined value, converting numbers or arrays to strings if necessary
+	        if (additionalValue !== undefined) {
+	            if (typeof additionalValue === 'number') {
+	                return String(additionalValue);
+	            }
+	            else if (Array.isArray(additionalValue)) {
+	                return additionalValue.join(', ');
+	            }
+	            else {
+	                return additionalValue;
+	            }
+	        }
+	        if (clientHeader !== undefined) {
+	            return clientHeader;
+	        }
+	        return _default;
+	    }
+	    _getAgent(parsedUrl) {
+	        let agent;
+	        const proxyUrl = pm.getProxyUrl(parsedUrl);
+	        const useProxy = proxyUrl && proxyUrl.hostname;
+	        if (this._keepAlive && useProxy) {
+	            agent = this._proxyAgent;
+	        }
+	        if (!useProxy) {
+	            agent = this._agent;
+	        }
+	        // if agent is already assigned use that agent.
+	        if (agent) {
+	            return agent;
+	        }
+	        const usingSsl = parsedUrl.protocol === 'https:';
+	        let maxSockets = 100;
+	        if (this.requestOptions) {
+	            maxSockets = this.requestOptions.maxSockets || http.globalAgent.maxSockets;
+	        }
+	        // This is `useProxy` again, but we need to check `proxyURl` directly for TypeScripts's flow analysis.
+	        if (proxyUrl && proxyUrl.hostname) {
+	            const agentOptions = {
+	                maxSockets,
+	                keepAlive: this._keepAlive,
+	                proxy: Object.assign(Object.assign({}, ((proxyUrl.username || proxyUrl.password) && {
+	                    proxyAuth: `${proxyUrl.username}:${proxyUrl.password}`
+	                })), { host: proxyUrl.hostname, port: proxyUrl.port })
+	            };
+	            let tunnelAgent;
+	            const overHttps = proxyUrl.protocol === 'https:';
+	            if (usingSsl) {
+	                tunnelAgent = overHttps ? tunnel.httpsOverHttps : tunnel.httpsOverHttp;
+	            }
+	            else {
+	                tunnelAgent = overHttps ? tunnel.httpOverHttps : tunnel.httpOverHttp;
+	            }
+	            agent = tunnelAgent(agentOptions);
+	            this._proxyAgent = agent;
+	        }
+	        // if tunneling agent isn't assigned create a new agent
+	        if (!agent) {
+	            const options = { keepAlive: this._keepAlive, maxSockets };
+	            agent = usingSsl ? new https.Agent(options) : new http.Agent(options);
+	            this._agent = agent;
+	        }
+	        if (usingSsl && this._ignoreSslError) {
+	            // we don't want to set NODE_TLS_REJECT_UNAUTHORIZED=0 since that will affect request for entire process
+	            // http.RequestOptions doesn't expose a way to modify RequestOptions.agent.options
+	            // we have to cast it to any and change it directly
+	            agent.options = Object.assign(agent.options || {}, {
+	                rejectUnauthorized: false
+	            });
+	        }
+	        return agent;
+	    }
+	    _getProxyAgentDispatcher(parsedUrl, proxyUrl) {
+	        let proxyAgent;
+	        if (this._keepAlive) {
+	            proxyAgent = this._proxyAgentDispatcher;
+	        }
+	        // if agent is already assigned use that agent.
+	        if (proxyAgent) {
+	            return proxyAgent;
+	        }
+	        const usingSsl = parsedUrl.protocol === 'https:';
+	        proxyAgent = new undici_1.ProxyAgent(Object.assign({ uri: proxyUrl.href, pipelining: !this._keepAlive ? 0 : 1 }, ((proxyUrl.username || proxyUrl.password) && {
+	            token: `Basic ${Buffer.from(`${proxyUrl.username}:${proxyUrl.password}`).toString('base64')}`
+	        })));
+	        this._proxyAgentDispatcher = proxyAgent;
+	        if (usingSsl && this._ignoreSslError) {
+	            // we don't want to set NODE_TLS_REJECT_UNAUTHORIZED=0 since that will affect request for entire process
+	            // http.RequestOptions doesn't expose a way to modify RequestOptions.agent.options
+	            // we have to cast it to any and change it directly
+	            proxyAgent.options = Object.assign(proxyAgent.options.requestTls || {}, {
+	                rejectUnauthorized: false
+	            });
+	        }
+	        return proxyAgent;
+	    }
+	    _getUserAgentWithOrchestrationId(userAgent) {
+	        const baseUserAgent = userAgent || 'actions/http-client';
+	        const orchId = process.env['ACTIONS_ORCHESTRATION_ID'];
+	        if (orchId) {
+	            // Sanitize the orchestration ID to ensure it contains only valid characters
+	            // Valid characters: 0-9, a-z, _, -, .
+	            const sanitizedId = orchId.replace(/[^a-z0-9_.-]/gi, '_');
+	            return `${baseUserAgent} actions_orchestration_id/${sanitizedId}`;
+	        }
+	        return baseUserAgent;
+	    }
+	    _performExponentialBackoff(retryNumber) {
+	        return __awaiter(this, void 0, void 0, function* () {
+	            retryNumber = Math.min(ExponentialBackoffCeiling, retryNumber);
+	            const ms = ExponentialBackoffTimeSlice * Math.pow(2, retryNumber);
+	            return new Promise(resolve => setTimeout(() => resolve(), ms));
+	        });
+	    }
+	    _processResponse(res, options) {
+	        return __awaiter(this, void 0, void 0, function* () {
+	            return new Promise((resolve, reject) => __awaiter(this, void 0, void 0, function* () {
+	                const statusCode = res.message.statusCode || 0;
+	                const response = {
+	                    statusCode,
+	                    result: null,
+	                    headers: {}
+	                };
+	                // not found leads to null obj returned
+	                if (statusCode === HttpCodes.NotFound) {
+	                    resolve(response);
+	                }
+	                // get the result from the body
+	                function dateTimeDeserializer(key, value) {
+	                    if (typeof value === 'string') {
+	                        const a = new Date(value);
+	                        if (!isNaN(a.valueOf())) {
+	                            return a;
+	                        }
+	                    }
+	                    return value;
+	                }
+	                let obj;
+	                let contents;
+	                try {
+	                    contents = yield res.readBody();
+	                    if (contents && contents.length > 0) {
+	                        if (options && options.deserializeDates) {
+	                            obj = JSON.parse(contents, dateTimeDeserializer);
+	                        }
+	                        else {
+	                            obj = JSON.parse(contents);
+	                        }
+	                        response.result = obj;
+	                    }
+	                    response.headers = res.message.headers;
+	                }
+	                catch (err) {
+	                    // Invalid resource (contents not json);  leaving result obj null
+	                }
+	                // note that 3xx redirects are handled by the http layer.
+	                if (statusCode > 299) {
+	                    let msg;
+	                    // if exception/error in body, attempt to get better error
+	                    if (obj && obj.message) {
+	                        msg = obj.message;
+	                    }
+	                    else if (contents && contents.length > 0) {
+	                        // it may be the case that the exception is in the body message as string
+	                        msg = contents;
+	                    }
+	                    else {
+	                        msg = `Failed request: (${statusCode})`;
+	                    }
+	                    const err = new HttpClientError(msg, statusCode);
+	                    err.result = response.result;
+	                    reject(err);
+	                }
+	                else {
+	                    resolve(response);
+	                }
+	            }));
+	        });
+	    }
+	}
+	lib.HttpClient = HttpClient;
+	const lowercaseKeys = (obj) => Object.keys(obj).reduce((c, k) => ((c[k.toLowerCase()] = obj[k]), c), {});
+	
+	return lib;
+}
 
 var auth = {};
 
@@ -40855,8 +41192,8 @@ function requireSummary () {
 		};
 		Object.defineProperty(exports$1, "__esModule", { value: true });
 		exports$1.summary = exports$1.markdownSummary = exports$1.SUMMARY_DOCS_URL = exports$1.SUMMARY_ENV_VAR = void 0;
-		const os_1 = require$$0;
-		const fs_1 = require$$1;
+		const os_1 = require$$0$9;
+		const fs_1 = require$$1$6;
 		const { access, appendFile, writeFile } = fs_1.promises;
 		exports$1.SUMMARY_ENV_VAR = 'GITHUB_STEP_SUMMARY';
 		exports$1.SUMMARY_DOCS_URL = 'https://docs.github.com/actions/using-workflows/workflow-commands-for-github-actions#adding-a-job-summary';
@@ -41174,7 +41511,7 @@ function requirePathUtils () {
 	pathUtils.toPosixPath = toPosixPath;
 	pathUtils.toWin32Path = toWin32Path;
 	pathUtils.toPlatformPath = toPlatformPath;
-	const path = __importStar(require$$0$a);
+	const path = __importStar(require$$0$b);
 	/**
 	 * toPosixPath converts the given path to the posix form. On Windows, \\ will be
 	 * replaced with /.
@@ -41277,8 +41614,8 @@ function requireIoUtil () {
 		exports$1.isRooted = isRooted;
 		exports$1.tryGetExecutablePath = tryGetExecutablePath;
 		exports$1.getCmdPath = getCmdPath;
-		const fs = __importStar(require$$1);
-		const path = __importStar(require$$0$a);
+		const fs = __importStar(require$$1$6);
+		const path = __importStar(require$$0$b);
 		_a = fs.promises
 		// export const {open} = 'fs'
 		, exports$1.chmod = _a.chmod, exports$1.copyFile = _a.copyFile, exports$1.lstat = _a.lstat, exports$1.mkdir = _a.mkdir, exports$1.open = _a.open, exports$1.readdir = _a.readdir, exports$1.rename = _a.rename, exports$1.rm = _a.rm, exports$1.rmdir = _a.rmdir, exports$1.stat = _a.stat, exports$1.symlink = _a.symlink, exports$1.unlink = _a.unlink;
@@ -41508,7 +41845,7 @@ function requireIo () {
 	io.which = which;
 	io.findInPath = findInPath;
 	const assert_1 = require$$5$2;
-	const path = __importStar(require$$0$a);
+	const path = __importStar(require$$0$b);
 	const ioUtil = __importStar(requireIoUtil());
 	/**
 	 * Copies a file or folder.
@@ -41822,10 +42159,10 @@ function requireToolrunner () {
 	Object.defineProperty(toolrunner, "__esModule", { value: true });
 	toolrunner.ToolRunner = void 0;
 	toolrunner.argStringToArray = argStringToArray;
-	const os = __importStar(require$$0);
-	const events = __importStar(require$$4$1);
-	const child = __importStar(require$$2$6);
-	const path = __importStar(require$$0$a);
+	const os = __importStar(require$$0$9);
+	const events = __importStar(require$$4);
+	const child = __importStar(require$$2$4);
+	const path = __importStar(require$$0$b);
 	const io = __importStar(requireIo());
 	const ioUtil = __importStar(requireIoUtil());
 	const timers_1 = require$$6$1;
@@ -42454,7 +42791,7 @@ function requireExec () {
 	Object.defineProperty(exec, "__esModule", { value: true });
 	exec.exec = exec$1;
 	exec.getExecOutput = getExecOutput;
-	const string_decoder_1 = require$$0$b;
+	const string_decoder_1 = require$$0$c;
 	const tr = __importStar(requireToolrunner());
 	/**
 	 * Exec a command.
@@ -42581,7 +42918,7 @@ function requirePlatform () {
 		Object.defineProperty(exports$1, "__esModule", { value: true });
 		exports$1.isLinux = exports$1.isMacOS = exports$1.isWindows = exports$1.arch = exports$1.platform = void 0;
 		exports$1.getDetails = getDetails;
-		const os_1 = __importDefault(require$$0);
+		const os_1 = __importDefault(require$$0$9);
 		const exec = __importStar(requireExec());
 		const getWindowsInfo = () => __awaiter(void 0, void 0, void 0, function* () {
 		    const { stdout: version } = yield exec.getExecOutput('powershell -command "(Get-CimInstance -ClassName Win32_OperatingSystem).Version"', undefined, {
@@ -42714,8 +43051,8 @@ function requireCore () {
 		const command_1 = requireCommand();
 		const file_command_1 = requireFileCommand();
 		const utils_1 = requireUtils$2();
-		const os = __importStar(require$$0);
-		const path = __importStar(require$$0$a);
+		const os = __importStar(require$$0$9);
+		const path = __importStar(require$$0$b);
 		const oidc_utils_1 = requireOidcUtils();
 		/**
 		 * The code to exit an action
@@ -44581,7 +44918,7 @@ function requireConstants () {
 	if (hasRequiredConstants) return constants;
 	hasRequiredConstants = 1;
 
-	const path = require$$0$a;
+	const path = require$$0$b;
 	const WIN_SLASH = '\\\\/';
 	const WIN_NO_SLASH = `[^${WIN_SLASH}]`;
 
@@ -44768,7 +45105,7 @@ function requireUtils () {
 	hasRequiredUtils = 1;
 	(function (exports$1) {
 
-		const path = require$$0$a;
+		const path = require$$0$b;
 		const win32 = process.platform === 'win32';
 		const {
 		  REGEX_BACKSLASH,
@@ -46339,7 +46676,7 @@ function requirePicomatch$1 () {
 	if (hasRequiredPicomatch$1) return picomatch_1;
 	hasRequiredPicomatch$1 = 1;
 
-	const path = require$$0$a;
+	const path = require$$0$b;
 	const scan = requireScan();
 	const parse = requireParse();
 	const utils = requireUtils();
@@ -47220,33 +47557,33 @@ class FileInfoArray extends Array {
     }
 }
 async function getFileChangesFromContext(octokit) {
-    if (githubExports.context.eventName === 'pull_request') {
-        if (githubExports.context.payload.pull_request) {
+    if (context.eventName === 'pull_request') {
+        if (context.payload.pull_request) {
             const data = await octokit.paginate(octokit.rest.pulls.listFiles, {
-                owner: githubExports.context.repo.owner,
-                repo: githubExports.context.repo.repo,
-                pull_number: githubExports.context.payload.pull_request.number
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: context.payload.pull_request.number
             });
             return new FileInfoArray(data);
         }
     }
-    else if (githubExports.context.eventName === 'push') {
-        let baseSha = githubExports.context.payload.before;
-        const headSha = githubExports.context.payload.after;
+    else if (context.eventName === 'push') {
+        let baseSha = context.payload.before;
+        const headSha = context.payload.after;
         // TODO: Add tests
         if (!baseSha || baseSha === '0000000000000000000000000000000000000000') {
             coreExports.warning('No valid previous commit SHA found. Assuming this is a new branch, diffing against the default branch.');
             const repoDetails = await octokit.rest.repos.get({
-                owner: githubExports.context.repo.owner,
-                repo: githubExports.context.repo.repo
+                owner: context.repo.owner,
+                repo: context.repo.repo
             });
             baseSha = repoDetails.data.default_branch;
         }
         coreExports.info(`Base: ${baseSha}`);
         coreExports.info(`Head: ${headSha}`);
         const { data: commits } = await octokit.rest.repos.compareCommits({
-            owner: githubExports.context.repo.owner,
-            repo: githubExports.context.repo.repo,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
             base: baseSha,
             head: headSha
         });
@@ -47284,7 +47621,7 @@ async function getChangedFiles(octokit, includeDeletedFiles, includeOnlyDirector
 async function run() {
     try {
         const inputs = await getInputs();
-        const octokit = githubExports.getOctokit(inputs.githubToken);
+        const octokit = getOctokit(inputs.githubToken);
         const changedFiles = await getChangedFiles(octokit, inputs.includeDeletedFiles, inputs.includeOnlyDirectories, inputs.searchPath, inputs.maxDepth, inputs.patterns);
         console.log('Changes:');
         changedFiles.forEach((file) => console.log(`  - ${file}`));
