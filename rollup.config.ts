@@ -3,6 +3,8 @@ import nodeResolve from '@rollup/plugin-node-resolve'
 import typescript from '@rollup/plugin-typescript'
 
 const config = {
+  context: 'globalThis',
+  external: [/^node:/],
   input: 'src/index.ts',
   output: {
     esModule: true,
