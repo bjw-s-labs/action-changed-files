@@ -39,7 +39,7 @@
   "license": "MIT",
   "dependencies": {
     "@actions/core": "2.0.2",
-    "@actions/github": "8.0.0",
+    "@actions/github": "9.0.0",
     "@types/micromatch": "4.0.10",
     "micromatch": "4.0.8"
   },
@@ -54,6 +54,7 @@
     "@rollup/plugin-typescript": "12.3.0",
     "@rollup/rollup-linux-x64-gnu": "*",
     "@types/jest": "30.0.0",
+    "@types/node": "24.2.0",
     "@typescript-eslint/eslint-plugin": "8.54.0",
     "@typescript-eslint/parser": "8.54.0",
     "eslint": "9.39.2",
