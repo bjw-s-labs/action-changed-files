@@ -553,6 +553,7 @@ function requireSymbols () {
 	  kEnableConnectProtocol: Symbol('http2session connect protocol'),
 	  kRemoteSettings: Symbol('http2session remote settings'),
 	  kHTTP2Stream: Symbol('http2session client stream'),
+	  kPingInterval: Symbol('ping interval'),
 	  kNoProxyAgent: Symbol('no proxy agent'),
 	  kHttpProxyAgent: Symbol('http proxy agent'),
 	  kHttpsProxyAgent: Symbol('https proxy agent')
@@ -9679,16 +9680,12 @@ function requireBody () {
 	    return Promise.reject(e)
 	  }
 
-	  const state = getInternalState(object);
+	  object = getInternalState(object);
 
 	  // 1. If object is unusable, then return a promise rejected
 	  //    with a TypeError.
-	  if (bodyUnusable(state)) {
+	  if (bodyUnusable(object)) {
 	    return Promise.reject(new TypeError('Body is unusable: Body has already been read'))
-	  }
-
-	  if (state.aborted) {
-	    return Promise.reject(new DOMException('The operation was aborted.', 'AbortError'))
 	  }
 
 	  // 2. Let promise be a new promise.
@@ -9711,14 +9708,14 @@ function requireBody () {
 
 	  // 5. If object’s body is null, then run successSteps with an
 	  //    empty byte sequence.
-	  if (state.body == null) {
+	  if (object.body == null) {
 	    successSteps(Buffer.allocUnsafe(0));
 	    return promise.promise
 	  }
 
 	  // 6. Otherwise, fully read object’s body given successSteps,
 	  //    errorSteps, and object’s relevant global object.
-	  fullyReadBody(state.body, successSteps, errorSteps);
+	  fullyReadBody(object.body, successSteps, errorSteps);
 
 	  // 7. Return promise.
 	  return promise.promise
@@ -11416,6 +11413,7 @@ function requireClientH2 () {
 	  kStrictContentLength,
 	  kOnError,
 	  kMaxConcurrentStreams,
+	  kPingInterval,
 	  kHTTP2Session,
 	  kHTTP2InitialWindowSize,
 	  kHTTP2ConnectionWindowSize,
@@ -11426,7 +11424,8 @@ function requireClientH2 () {
 	  kBodyTimeout,
 	  kEnableConnectProtocol,
 	  kRemoteSettings,
-	  kHTTP2Stream
+	  kHTTP2Stream,
+	  kHTTP2SessionState
 	} = requireSymbols();
 	const { channels } = requireDiagnostics();
 
@@ -11494,10 +11493,15 @@ function requireClientH2 () {
 	    }
 	  });
 
+	  client[kSocket] = socket;
 	  session[kOpenStreams] = 0;
 	  session[kClient] = client;
 	  session[kSocket] = socket;
-	  session[kHTTP2Session] = null;
+	  session[kHTTP2SessionState] = {
+	    ping: {
+	      interval: client[kPingInterval] === 0 ? null : setInterval(onHttp2SendPing, client[kPingInterval], session).unref()
+	    }
+	  };
 	  // We set it to true by default in a best-effort; however once connected to an H2 server
 	  // we will check if extended CONNECT protocol is supported or not
 	  // and set this value accordingly.
@@ -11645,6 +11649,31 @@ function requireClientH2 () {
 	  this[kClient][kResume]();
 	}
 
+	function onHttp2SendPing (session) {
+	  const state = session[kHTTP2SessionState];
+	  if ((session.closed || session.destroyed) && state.ping.interval != null) {
+	    clearInterval(state.ping.interval);
+	    state.ping.interval = null;
+	    return
+	  }
+
+	  // If no ping sent, do nothing
+	  session.ping(onPing.bind(session));
+
+	  function onPing (err, duration) {
+	    const client = this[kClient];
+	    const socket = this[kClient];
+
+	    if (err != null) {
+	      const error = new InformationalError(`HTTP/2: "PING" errored - type ${err.message}`);
+	      socket[kError] = error;
+	      client[kOnError](error);
+	    } else {
+	      client.emit('ping', duration);
+	    }
+	  }
+	}
+
 	function onHttp2SessionError (err) {
 	  assert(err.code !== 'ERR_TLS_CERT_ALTNAME_INVALID');
 
@@ -11708,13 +11737,18 @@ function requireClientH2 () {
 	}
 
 	function onHttp2SessionClose () {
-	  const { [kClient]: client } = this;
+	  const { [kClient]: client, [kHTTP2SessionState]: state } = this;
 	  const { [kSocket]: socket } = client;
 
 	  const err = this[kSocket][kError] || this[kError] || new SocketError('closed', util.getSocketInfo(socket));
 
 	  client[kSocket] = null;
 	  client[kHTTPContext] = null;
+
+	  if (state.ping.interval != null) {
+	    clearInterval(state.ping.interval);
+	    state.ping.interval = null;
+	  }
 
 	  if (client.destroyed) {
 	    assert(client[kPending] === 0);
@@ -12407,7 +12441,8 @@ function requireClient () {
 	  kMaxConcurrentStreams,
 	  kHTTP2InitialWindowSize,
 	  kHTTP2ConnectionWindowSize,
-	  kResume
+	  kResume,
+	  kPingInterval
 	} = requireSymbols();
 	const connectH1 = requireClientH1();
 	const connectH2 = requireClientH2();
@@ -12465,7 +12500,8 @@ function requireClient () {
 	    allowH2,
 	    useH2c,
 	    initialWindowSize,
-	    connectionWindowSize
+	    connectionWindowSize,
+	    pingInterval
 	  } = {}) {
 	    if (keepAlive !== undefined) {
 	      throw new InvalidArgumentError('unsupported keepAlive, use pipelining=0 instead')
@@ -12569,6 +12605,10 @@ function requireClient () {
 	      throw new InvalidArgumentError('connectionWindowSize must be a positive integer, greater than 0')
 	    }
 
+	    if (pingInterval != null && (typeof pingInterval !== 'number' || !Number.isInteger(pingInterval) || pingInterval < 0)) {
+	      throw new InvalidArgumentError('pingInterval must be a positive integer, greater or equal to 0')
+	    }
+
 	    super();
 
 	    if (typeof connect !== 'function') {
@@ -12603,6 +12643,8 @@ function requireClient () {
 	    this[kMaxRequests] = maxRequestsPerClient;
 	    this[kClosedResolve] = null;
 	    this[kMaxResponseSize] = maxResponseSize > -1 ? maxResponseSize : -1;
+	    this[kHTTPContext] = null;
+	    // h2
 	    this[kMaxConcurrentStreams] = maxConcurrentStreams != null ? maxConcurrentStreams : 100; // Max peerConcurrentStreams for a Node h2 server
 	    // HTTP/2 window sizes are set to higher defaults than Node.js core for better performance:
 	    // - initialWindowSize: 262144 (256KB) vs Node.js default 65535 (64KB - 1)
@@ -12612,7 +12654,7 @@ function requireClient () {
 	    //   Provides better flow control for the entire connection across multiple streams.
 	    this[kHTTP2InitialWindowSize] = initialWindowSize != null ? initialWindowSize : 262144;
 	    this[kHTTP2ConnectionWindowSize] = connectionWindowSize != null ? connectionWindowSize : 524288;
-	    this[kHTTPContext] = null;
+	    this[kPingInterval] = pingInterval != null ? pingInterval : 60e3; // Default ping interval for h2 - 1 minute
 
 	    // kQueue is built up of 3 sections separated by
 	    // the kRunningIdx and kPendingIdx indices.
@@ -13189,9 +13231,12 @@ function requirePoolBase () {
 	    }
 
 	    if (this[kClosedResolve] && queue.isEmpty()) {
-	      const closeAll = new Array(this[kClients].length);
+	      const closeAll = [];
 	      for (let i = 0; i < this[kClients].length; i++) {
-	        closeAll[i] = this[kClients][i].close();
+	        const client = this[kClients][i];
+	        if (!client.destroyed) {
+	          closeAll.push(client.close());
+	        }
 	      }
 	      return Promise.all(closeAll)
 	        .then(this[kClosedResolve])
@@ -13260,9 +13305,12 @@ function requirePoolBase () {
 
 	  [kClose] () {
 	    if (this[kQueue].isEmpty()) {
-	      const closeAll = new Array(this[kClients].length);
+	      const closeAll = [];
 	      for (let i = 0; i < this[kClients].length; i++) {
-	        closeAll[i] = this[kClients][i].close();
+	        const client = this[kClients][i];
+	        if (!client.destroyed) {
+	          closeAll.push(client.close());
+	        }
 	      }
 	      return Promise.all(closeAll)
 	    } else {
@@ -13944,7 +13992,9 @@ function requireAgent () {
 	          if (connected) result.count -= 1;
 	          if (result.count <= 0) {
 	            this[kClients].delete(key);
-	            result.dispatcher.close();
+	            if (!result.dispatcher.destroyed) {
+	              result.dispatcher.close();
+	            }
 	          }
 	          this[kOrigins].delete(key);
 	        }
@@ -24831,7 +24881,8 @@ function requireResponse () {
 	    const clonedResponse = cloneResponse(this.#state);
 
 	    // Note: To re-register because of a new stream.
-	    if (this.#state.body?.stream) {
+	    // Don't set finalizers other than for fetch responses.
+	    if (this.#state.urlList.length !== 0 && this.#state.body?.stream) {
 	      streamRegistry.register(this, new WeakRef(this.#state.body.stream));
 	    }
 
@@ -26830,7 +26881,7 @@ function requireFetch () {
 	  if (requestObject.signal.aborted) {
 	    // 1. Abort the fetch() call with p, request, null, and
 	    //    requestObject’s signal’s abort reason.
-	    abortFetch(p, request, null, requestObject.signal.reason);
+	    abortFetch(p, request, null, requestObject.signal.reason, null);
 
 	    // 2. Return p.
 	    return p.promise
@@ -26873,7 +26924,7 @@ function requireFetch () {
 
 	      // 4. Abort the fetch() call with p, request, responseObject,
 	      //    and requestObject’s signal’s abort reason.
-	      abortFetch(p, request, realResponse, requestObject.signal.reason);
+	      abortFetch(p, request, realResponse, requestObject.signal.reason, controller.controller);
 	    }
 	  );
 
@@ -26900,7 +26951,7 @@ function requireFetch () {
 	      // 2. Abort the fetch() call with p, request, responseObject, and
 	      //    deserializedError.
 
-	      abortFetch(p, request, responseObject, controller.serializedAbortReason);
+	      abortFetch(p, request, responseObject, controller.serializedAbortReason, controller.controller);
 	      return
 	    }
 
@@ -27000,7 +27051,7 @@ function requireFetch () {
 	const markResourceTiming = performance.markResourceTiming;
 
 	// https://fetch.spec.whatwg.org/#abort-fetch
-	function abortFetch (p, request, responseObject, error) {
+	function abortFetch (p, request, responseObject, error, controller /* undici-specific */) {
 	  // 1. Reject promise with error.
 	  if (p) {
 	    // We might have already resolved the promise at this stage
@@ -27030,13 +27081,7 @@ function requireFetch () {
 	  // 5. If response’s body is not null and is readable, then error response’s
 	  // body with error.
 	  if (response.body?.stream != null && isReadable(response.body.stream)) {
-	    response.body.stream.cancel(error).catch((err) => {
-	      if (err.code === 'ERR_INVALID_STATE') {
-	        // Node bug?
-	        return
-	      }
-	      throw err
-	    });
+	    controller.error(error);
 	  }
 	}
 
@@ -35283,6 +35328,10 @@ function requireUndici () {
 
 		const fetchImpl = requireFetch().fetch;
 
+		// Capture __filename at module load time for stack trace augmentation.
+		// This may be undefined when bundled in environments like Node.js internals.
+		const currentFilename = typeof __filename !== 'undefined' ? __filename : undefined;
+
 		function appendFetchStackTrace (err, filename) {
 		  if (!err || typeof err !== 'object') {
 		    return
@@ -35309,7 +35358,11 @@ function requireUndici () {
 
 		module.exports.fetch = function fetch (init, options = undefined) {
 		  return fetchImpl(init, options).catch(err => {
-		    appendFetchStackTrace(err, __filename);
+		    if (currentFilename) {
+		      appendFetchStackTrace(err, currentFilename);
+		    } else if (err && typeof err === 'object') {
+		      Error.captureStackTrace(err, module.exports.fetch);
+		    }
 		    throw err
 		  })
 		};
