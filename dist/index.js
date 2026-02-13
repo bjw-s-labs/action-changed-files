@@ -8285,7 +8285,7 @@ function requireUtil$4 () {
 	 */
 	function includesCredentials (url) {
 	  // A URL includes credentials if its username or password is not the empty string.
-	  return !!(url.username && url.password)
+	  return !!(url.username || url.password)
 	}
 
 	/**
@@ -14456,16 +14456,14 @@ function requireEnvHttpProxyAgent () {
 	      if (entry.port && entry.port !== port) {
 	        continue // Skip if ports don't match.
 	      }
-	      if (!/^[.*]/.test(entry.hostname)) {
-	        // No wildcards, so don't proxy only if there is not an exact match.
-	        if (hostname === entry.hostname) {
-	          return false
-	        }
-	      } else {
-	        // Don't proxy if the hostname ends with the no_proxy host.
-	        if (hostname.endsWith(entry.hostname.replace(/^\*/, ''))) {
-	          return false
-	        }
+	      // Don't proxy if the hostname is equal with the no_proxy host.
+	      if (hostname === entry.hostname) {
+	        return false
+	      }
+	      // Don't proxy if the hostname is the subdomain of the no_proxy host.
+	      // Reference - https://github.com/denoland/deno/blob/6fbce91e40cc07fc6da74068e5cc56fdd40f7b4c/ext/fetch/proxy.rs#L485
+	      if (hostname.slice(-(entry.hostname.length + 1)) === `.${entry.hostname}`) {
+	        return false
 	      }
 	    }
 
@@ -14484,7 +14482,8 @@ function requireEnvHttpProxyAgent () {
 	      }
 	      const parsed = entry.match(/^(.+):(\d+)$/);
 	      noProxyEntries.push({
-	        hostname: (parsed ? parsed[1] : entry).toLowerCase(),
+	        // strip leading dot or asterisk with dot
+	        hostname: (parsed ? parsed[1] : entry).replace(/^\*?\./, '').toLowerCase(),
 	        port: parsed ? Number.parseInt(parsed[2], 10) : 0
 	      });
 	    }
@@ -21621,57 +21620,92 @@ function requireCacheHandler () {
 	    // Not modified, re-use the cached value
 	    // https://www.rfc-editor.org/rfc/rfc9111.html#name-handling-304-not-modified
 	    if (statusCode === 304) {
-	      /**
-	       * @type {import('../../types/cache-interceptor.d.ts').default.CacheValue}
-	       */
-	      const cachedValue = this.#store.get(this.#cacheKey);
-	      if (!cachedValue) {
-	        // Do not create a new cache entry, as a 304 won't have a body - so cannot be cached.
-	        return downstreamOnHeaders()
-	      }
+	      const handle304 = (cachedValue) => {
+	        if (!cachedValue) {
+	          // Do not create a new cache entry, as a 304 won't have a body - so cannot be cached.
+	          return downstreamOnHeaders()
+	        }
 
-	      // Re-use the cached value: statuscode, statusmessage, headers and body
-	      value.statusCode = cachedValue.statusCode;
-	      value.statusMessage = cachedValue.statusMessage;
-	      value.etag = cachedValue.etag;
-	      value.headers = { ...cachedValue.headers, ...strippedHeaders };
+	        // Re-use the cached value: statuscode, statusmessage, headers and body
+	        value.statusCode = cachedValue.statusCode;
+	        value.statusMessage = cachedValue.statusMessage;
+	        value.etag = cachedValue.etag;
+	        value.headers = { ...cachedValue.headers, ...strippedHeaders };
 
-	      downstreamOnHeaders();
+	        downstreamOnHeaders();
 
-	      this.#writeStream = this.#store.createWriteStream(this.#cacheKey, value);
+	        this.#writeStream = this.#store.createWriteStream(this.#cacheKey, value);
 
-	      if (!this.#writeStream || !cachedValue?.body) {
-	        return
-	      }
+	        if (!this.#writeStream || !cachedValue?.body) {
+	          return
+	        }
 
-	      const bodyIterator = cachedValue.body.values();
+	        if (typeof cachedValue.body.values === 'function') {
+	          const bodyIterator = cachedValue.body.values();
 
-	      const streamCachedBody = () => {
-	        for (const chunk of bodyIterator) {
-	          const full = this.#writeStream.write(chunk) === false;
-	          this.#handler.onResponseData?.(controller, chunk);
-	          // when stream is full stop writing until we get a 'drain' event
-	          if (full) {
-	            break
-	          }
+	          const streamCachedBody = () => {
+	            for (const chunk of bodyIterator) {
+	              const full = this.#writeStream.write(chunk) === false;
+	              this.#handler.onResponseData?.(controller, chunk);
+	              // when stream is full stop writing until we get a 'drain' event
+	              if (full) {
+	                break
+	              }
+	            }
+	          };
+
+	          this.#writeStream
+	            .on('error', function () {
+	              handler.#writeStream = undefined;
+	              handler.#store.delete(handler.#cacheKey);
+	            })
+	            .on('drain', () => {
+	              streamCachedBody();
+	            })
+	            .on('close', function () {
+	              if (handler.#writeStream === this) {
+	                handler.#writeStream = undefined;
+	              }
+	            });
+
+	          streamCachedBody();
+	        } else if (typeof cachedValue.body.on === 'function') {
+	          // Readable stream body (e.g. from async/remote cache stores)
+	          cachedValue.body
+	            .on('data', (chunk) => {
+	              this.#writeStream.write(chunk);
+	              this.#handler.onResponseData?.(controller, chunk);
+	            })
+	            .on('end', () => {
+	              this.#writeStream.end();
+	            })
+	            .on('error', () => {
+	              this.#writeStream = undefined;
+	              this.#store.delete(this.#cacheKey);
+	            });
+
+	          this.#writeStream
+	            .on('error', function () {
+	              handler.#writeStream = undefined;
+	              handler.#store.delete(handler.#cacheKey);
+	            })
+	            .on('close', function () {
+	              if (handler.#writeStream === this) {
+	                handler.#writeStream = undefined;
+	              }
+	            });
 	        }
 	      };
 
-	      this.#writeStream
-	        .on('error', function () {
-	          handler.#writeStream = undefined;
-	          handler.#store.delete(handler.#cacheKey);
-	        })
-	        .on('drain', () => {
-	          streamCachedBody();
-	        })
-	        .on('close', function () {
-	          if (handler.#writeStream === this) {
-	            handler.#writeStream = undefined;
-	          }
-	        });
-
-	      streamCachedBody();
+	      /**
+	       * @type {import('../../types/cache-interceptor.d.ts').default.CacheValue}
+	       */
+	      const result = this.#store.get(this.#cacheKey);
+	      if (result && typeof result.then === 'function') {
+	        result.then(handle304);
+	      } else {
+	        handle304(result);
+	      }
 	    } else {
 	      if (typeof resHeaders.etag === 'string' && isEtagUsable(resHeaders.etag)) {
 	        value.etag = resHeaders.etag;
@@ -22628,7 +22662,7 @@ function requireCache$1 () {
 
 	      // Start background revalidation (fire-and-forget)
 	      queueMicrotask(() => {
-	        let headers = {
+	        const headers = {
 	          ...opts.headers,
 	          'if-modified-since': new Date(result.cachedAt).toUTCString()
 	        };
@@ -22638,10 +22672,11 @@ function requireCache$1 () {
 	        }
 
 	        if (result.vary) {
-	          headers = {
-	            ...headers,
-	            ...result.vary
-	          };
+	          for (const key in result.vary) {
+	            if (result.vary[key] != null) {
+	              headers[key] = result.vary[key];
+	            }
+	          }
 	        }
 
 	        // Background revalidation - update cache if we get new data
@@ -22671,7 +22706,7 @@ function requireCache$1 () {
 	      withinStaleIfErrorThreshold = now < (result.staleAt + (staleIfErrorExpiry * 1000));
 	    }
 
-	    let headers = {
+	    const headers = {
 	      ...opts.headers,
 	      'if-modified-since': new Date(result.cachedAt).toUTCString()
 	    };
@@ -22681,10 +22716,11 @@ function requireCache$1 () {
 	    }
 
 	    if (result.vary) {
-	      headers = {
-	        ...headers,
-	        ...result.vary
-	      };
+	      for (const key in result.vary) {
+	        if (result.vary[key] != null) {
+	          headers[key] = result.vary[key];
+	        }
+	      }
 	    }
 
 	    // We need to revalidate the response
@@ -23374,8 +23410,6 @@ function requireDeduplicate () {
 	  // Convert to lowercase Set for case-insensitive header exclusion from deduplication key
 	  const excludeHeaderNamesSet = new Set(excludeHeaderNames.map(name => name.toLowerCase()));
 
-	  const safeMethodsToNotDeduplicate = util.safeHTTPMethods.filter(method => methods.includes(method) === false);
-
 	  /**
 	   * Map of pending requests for deduplication
 	   * @type {Map<string, DeduplicationHandler>}
@@ -23384,7 +23418,7 @@ function requireDeduplicate () {
 
 	  return dispatch => {
 	    return (opts, handler) => {
-	      if (!opts.origin || safeMethodsToNotDeduplicate.includes(opts.method)) {
+	      if (!opts.origin || methods.includes(opts.method) === false) {
 	        return dispatch(opts, handler)
 	      }
 
@@ -28968,6 +29002,41 @@ function requireFetch () {
 	          fetchParams.controller.terminate(error);
 
 	          reject(error);
+	        },
+
+	        onRequestUpgrade (_controller, status, headers, socket) {
+	          // We need to support 200 for websocket over h2 as per RFC-8441
+	          // Absence of session means H1
+	          if ((socket.session != null && status !== 200) || (socket.session == null && status !== 101)) {
+	            return false
+	          }
+
+	          const headersList = new HeadersList();
+
+	          for (const [name, value] of Object.entries(headers)) {
+	            if (value == null) {
+	              continue
+	            }
+
+	            const headerName = name.toLowerCase();
+
+	            if (Array.isArray(value)) {
+	              for (const entry of value) {
+	                headersList.append(headerName, String(entry), true);
+	              }
+	            } else {
+	              headersList.append(headerName, String(value), true);
+	            }
+	          }
+
+	          resolve({
+	            status,
+	            statusText: STATUS_CODES[status],
+	            headersList,
+	            socket
+	          });
+
+	          return true
 	        },
 
 	        onUpgrade (status, rawHeaders, socket) {
