@@ -70,7 +70,7 @@
     "ts-jest-resolver": "2.0.1"
   },
   "resolutions": {
-    "undici": "7.21.0",
+    "undici": "7.22.0",
     "fast-xml-parser": ">=5.3.4"
   }
 }
