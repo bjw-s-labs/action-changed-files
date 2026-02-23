@@ -68,9 +68,5 @@
     "rollup": "4.59.0",
     "ts-jest": "29.4.6",
     "ts-jest-resolver": "2.0.1"
-  },
-  "resolutions": {
-    "undici": "7.22.0",
-    "fast-xml-parser": ">=5.3.4"
   }
 }
