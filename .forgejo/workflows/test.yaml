@@ -1,5 +1,5 @@
 ---
-name: Continuous Integration
+name: Test
 
 on:
   pull_request:
@@ -24,12 +24,6 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
-        name: Install pnpm
-        with:
-          version: latest
-          run_install: false
-
       - name: Setup Node.js
         id: setup-node
         uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
@@ -37,18 +31,15 @@ jobs:
           node-version-file: .node-version
           cache: pnpm
 
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+        name: Install pnpm
+        with:
+          run_install: false
+
       - name: Install Dependencies
         id: npm-ci
         run: |
           pnpm run ci
-
-      - name: Check Format
-        id: npm-format-check
-        run: pnpm run format:check
-
-      - name: Lint
-        id: npm-lint
-        run: pnpm run lint
 
       - name: Test
         id: npm-ci-test
