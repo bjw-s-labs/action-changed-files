@@ -12,7 +12,9 @@ import { getChangedFiles } from './changes-helper.js'
 export async function run(): Promise<void> {
   try {
     const inputs = await inputHelper.getInputs()
-    const octokit = github.getOctokit(inputs.githubToken)
+    const octokit = github.getOctokit(inputs.githubToken, {
+      baseUrl: process.env.GITHUB_API_URL
+    })
 
     const changedFiles = await getChangedFiles(
       octokit,

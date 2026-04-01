@@ -25,8 +25,10 @@ export class FileInfoArray extends Array<FileInfo> {
     })) as FileInfoArray
   }
 
-  filterStatus(status: string): FileInfoArray {
-    return this.filter((file) => file.status !== status) as FileInfoArray
+  filterStatus(statuses: string[]): FileInfoArray {
+    return this.filter(
+      (file) => file.status === undefined || !statuses.includes(file.status)
+    ) as FileInfoArray
   }
 
   filterDirectories(maxDepth: number): FileInfoArray {
@@ -120,7 +122,7 @@ export async function getChangedFiles(
   }
 
   if (!includeDeletedFiles) {
-    files = files.filterStatus('removed')
+    files = files.filterStatus(['removed', 'deleted'])
   }
 
   if (includeOnlyDirectories) {

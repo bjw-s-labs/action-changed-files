@@ -41572,7 +41572,7 @@ const GitHub = Octokit.plugin(restEndpointMethods, paginateRest).defaults(defaul
  * @param     options  other options to set
  */
 function getOctokitOptions(token, options) {
-    const opts = Object.assign({}, {}); // Shallow clone - don't mutate the object provided by the caller
+    const opts = Object.assign({}, options || {}); // Shallow clone - don't mutate the object provided by the caller
     // Auth
     const auth = getAuthString(token, opts);
     if (auth) {
@@ -41590,7 +41590,7 @@ const context = new Context();
  */
 function getOctokit(token, options, ...additionalPlugins) {
     const GitHubWithPlugins = GitHub.plugin(...additionalPlugins);
-    return new GitHubWithPlugins(getOctokitOptions(token));
+    return new GitHubWithPlugins(getOctokitOptions(token, options));
 }
 
 // We use any as a valid input type
@@ -46145,8 +46145,8 @@ class FileInfoArray extends Array {
             filename: path.relative(searchPath, file.filename)
         }));
     }
-    filterStatus(status) {
-        return this.filter((file) => file.status !== status);
+    filterStatus(statuses) {
+        return this.filter((file) => file.status === undefined || !statuses.includes(file.status));
     }
     filterDirectories(maxDepth) {
         const dirs = new Set();
@@ -46218,7 +46218,7 @@ async function getChangedFiles(octokit, includeDeletedFiles, includeOnlyDirector
         files = files.filterByPath(searchPath);
     }
     if (!includeDeletedFiles) {
-        files = files.filterStatus('removed');
+        files = files.filterStatus(['removed', 'deleted']);
     }
     if (includeOnlyDirectories) {
         files = files.filterDirectories(maxDepth);
@@ -46238,7 +46238,9 @@ async function getChangedFiles(octokit, includeDeletedFiles, includeOnlyDirector
 async function run() {
     try {
         const inputs = await getInputs();
-        const octokit = getOctokit(inputs.githubToken);
+        const octokit = getOctokit(inputs.githubToken, {
+            baseUrl: process.env.GITHUB_API_URL
+        });
         const changedFiles = await getChangedFiles(octokit, inputs.includeDeletedFiles, inputs.includeOnlyDirectories, inputs.searchPath, inputs.maxDepth, inputs.patterns);
         console.log('Changes:');
         changedFiles.forEach((file) => console.log(`  - ${file}`));
