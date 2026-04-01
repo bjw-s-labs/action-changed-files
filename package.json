@@ -3,7 +3,7 @@
   "description": "GitHub Action to return changed files",
   "version": "0.3.1",
   "author": "bjw-s-labs",
-  "packageManager": "pnpm@10.17.1",
+  "packageManager": "pnpm@10.33.0",
   "type": "module",
   "private": true,
   "homepage": "https://github.com/bjw-s-labs/action-changed-files",
