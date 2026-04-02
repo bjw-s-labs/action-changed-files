@@ -1892,23 +1892,9 @@ function requireUtil$5 () {
 	/**
 	 * @param {*} object
 	 * @returns {object is Blob}
-	 * based on https://github.com/node-fetch/fetch-blob/blob/8ab587d34080de94140b54f07168451e7d0b655e/index.js#L229-L241 (MIT License)
 	 */
 	function isBlobLike (object) {
-	  if (object === null) {
-	    return false
-	  } else if (object instanceof Blob) {
-	    return true
-	  } else if (typeof object !== 'object') {
-	    return false
-	  } else {
-	    const sTag = object[Symbol.toStringTag];
-
-	    return (sTag === 'Blob' || sTag === 'File') && (
-	      ('stream' in object && typeof object.stream === 'function') ||
-	      ('arrayBuffer' in object && typeof object.arrayBuffer === 'function')
-	    )
-	  }
+	  return object instanceof Blob
 	}
 
 	/**
@@ -2315,6 +2301,26 @@ function requireUtil$5 () {
 	}
 
 	/**
+	 * @param {Record<string, string | string[]>} headers
+	 * @returns {Buffer[]}
+	 */
+	function toRawHeaders (headers) {
+	  const rawHeaders = [];
+
+	  for (const [name, value] of Object.entries(headers)) {
+	    if (Array.isArray(value)) {
+	      for (const entry of value) {
+	        rawHeaders.push(Buffer.from(name, 'latin1'), Buffer.from(`${entry}`, 'latin1'));
+	      }
+	    } else {
+	      rawHeaders.push(Buffer.from(name, 'latin1'), Buffer.from(`${value}`, 'latin1'));
+	    }
+	  }
+
+	  return rawHeaders
+	}
+
+	/**
 	 * @param {string[]} headers
 	 * @param {Buffer[]} headers
 	 */
@@ -2347,38 +2353,37 @@ function requireUtil$5 () {
 	    throw new InvalidArgumentError('handler must be an object')
 	  }
 
-	  if (typeof handler.onRequestStart === 'function') {
-	    // TODO (fix): More checks...
-	    return
+	  if (typeof handler.onRequestStart !== 'function') {
+	    throw new InvalidArgumentError('invalid onRequestStart method')
 	  }
 
-	  if (typeof handler.onConnect !== 'function') {
-	    throw new InvalidArgumentError('invalid onConnect method')
-	  }
-
-	  if (typeof handler.onError !== 'function') {
-	    throw new InvalidArgumentError('invalid onError method')
+	  if (typeof handler.onResponseError !== 'function') {
+	    throw new InvalidArgumentError('invalid onResponseError method')
 	  }
 
 	  if (typeof handler.onBodySent !== 'function' && handler.onBodySent !== undefined) {
 	    throw new InvalidArgumentError('invalid onBodySent method')
 	  }
 
+	  if (typeof handler.onRequestSent !== 'function' && handler.onRequestSent !== undefined) {
+	    throw new InvalidArgumentError('invalid onRequestSent method')
+	  }
+
 	  if (upgrade || method === 'CONNECT') {
-	    if (typeof handler.onUpgrade !== 'function') {
-	      throw new InvalidArgumentError('invalid onUpgrade method')
+	    if (typeof handler.onRequestUpgrade !== 'function') {
+	      throw new InvalidArgumentError('invalid onRequestUpgrade method')
 	    }
 	  } else {
-	    if (typeof handler.onHeaders !== 'function') {
-	      throw new InvalidArgumentError('invalid onHeaders method')
+	    if (typeof handler.onResponseStart !== 'function') {
+	      throw new InvalidArgumentError('invalid onResponseStart method')
 	    }
 
-	    if (typeof handler.onData !== 'function') {
-	      throw new InvalidArgumentError('invalid onData method')
+	    if (typeof handler.onResponseData !== 'function') {
+	      throw new InvalidArgumentError('invalid onResponseData method')
 	    }
 
-	    if (typeof handler.onComplete !== 'function') {
-	      throw new InvalidArgumentError('invalid onComplete method')
+	    if (typeof handler.onResponseEnd !== 'function') {
+	      throw new InvalidArgumentError('invalid onResponseEnd method')
 	    }
 	  }
 	}
@@ -2619,7 +2624,7 @@ function requireUtil$5 () {
 	 */
 	function errorRequest (client, request, err) {
 	  try {
-	    request.onError(err);
+	    request.onResponseError(err);
 	    assert(request.aborted);
 	  } catch (err) {
 	    client.emit('error', err);
@@ -2768,6 +2773,7 @@ function requireUtil$5 () {
 	  removeAllListeners,
 	  errorRequest,
 	  parseRawHeaders,
+	  toRawHeaders,
 	  encodeRawHeaders,
 	  parseHeaders,
 	  parseKeepAliveTimeout,
@@ -3098,6 +3104,7 @@ function requireRequest$1 () {
 	  hasSafeIterator,
 	  isBlobLike,
 	  serializePathWithQuery,
+	  parseHeaders,
 	  assertRequestHandler,
 	  getServerName,
 	  normalizedMethodRecords,
@@ -3110,6 +3117,55 @@ function requireRequest$1 () {
 	const invalidPathRegex = /[^\u0021-\u00ff]/;
 
 	const kHandler = Symbol('handler');
+	const kController = Symbol('controller');
+	const kResume = Symbol('resume');
+
+	class RequestController {
+	  #paused = false
+	  #reason = null
+	  #aborted = false
+	  #abort
+
+	  [kResume] = null
+
+	  rawHeaders = null
+	  rawTrailers = null
+
+	  constructor (abort) {
+	    this.#abort = abort;
+	  }
+
+	  pause () {
+	    this.#paused = true;
+	  }
+
+	  resume () {
+	    if (this.#paused) {
+	      this.#paused = false;
+	      this[kResume]?.();
+	    }
+	  }
+
+	  abort (reason) {
+	    if (!this.#aborted) {
+	      this.#aborted = true;
+	      this.#reason = reason;
+	      this.#abort(reason);
+	    }
+	  }
+
+	  get aborted () {
+	    return this.#aborted
+	  }
+
+	  get reason () {
+	    return this.#reason
+	  }
+
+	  get paused () {
+	    return this.#paused
+	  }
+	}
 
 	class Request {
 	  constructor (origin, {
@@ -3323,23 +3379,26 @@ function requireRequest$1 () {
 	    }
 	  }
 
-	  onConnect (abort) {
+	  onRequestStart (abort, context) {
 	    assert(!this.aborted);
 	    assert(!this.completed);
 
+	    this[kController] = new RequestController(abort);
+
 	    if (this.error) {
-	      abort(this.error);
-	    } else {
-	      this.abort = abort;
-	      return this[kHandler].onConnect(abort)
+	      this[kController].abort(this.error);
+	      return
 	    }
+
+	    this.abort = abort;
+	    return this[kHandler].onRequestStart(this[kController], context)
 	  }
 
 	  onResponseStarted () {
 	    return this[kHandler].onResponseStarted?.()
 	  }
 
-	  onHeaders (statusCode, headers, resume, statusText) {
+	  onResponseStart (statusCode, headers, resume, statusText) {
 	    assert(!this.aborted);
 	    assert(!this.completed);
 
@@ -3347,36 +3406,56 @@ function requireRequest$1 () {
 	      channels.headers.publish({ request: this, response: { statusCode, headers, statusText } });
 	    }
 
-	    try {
-	      return this[kHandler].onHeaders(statusCode, headers, resume, statusText)
-	    } catch (err) {
-	      this.abort(err);
+	    const controller = this[kController];
+	    if (controller) {
+	      controller[kResume] = resume;
+	      controller.rawHeaders = headers;
 	    }
-	  }
 
-	  onData (chunk) {
-	    assert(!this.aborted);
-	    assert(!this.completed);
+	    const parsedHeaders = Array.isArray(headers) ? parseHeaders(headers) : headers;
 
-	    if (channels.bodyChunkReceived.hasSubscribers) {
-	      channels.bodyChunkReceived.publish({ request: this, chunk });
-	    }
 	    try {
-	      return this[kHandler].onData(chunk)
+	      this[kHandler].onResponseStart?.(controller, statusCode, parsedHeaders, statusText);
+	      return !controller?.paused
 	    } catch (err) {
 	      this.abort(err);
 	      return false
 	    }
 	  }
 
-	  onUpgrade (statusCode, headers, socket) {
+	  onResponseData (chunk) {
 	    assert(!this.aborted);
 	    assert(!this.completed);
 
-	    return this[kHandler].onUpgrade(statusCode, headers, socket)
+	    if (channels.bodyChunkReceived.hasSubscribers) {
+	      channels.bodyChunkReceived.publish({ request: this, chunk });
+	    }
+
+	    const controller = this[kController];
+	    try {
+	      this[kHandler].onResponseData?.(controller, chunk);
+	      return !controller?.paused
+	    } catch (err) {
+	      this.abort(err);
+	      return false
+	    }
 	  }
 
-	  onComplete (trailers) {
+	  onRequestUpgrade (statusCode, headers, socket) {
+	    assert(!this.aborted);
+	    assert(!this.completed);
+
+	    const controller = this[kController];
+	    if (controller) {
+	      controller.rawHeaders = headers;
+	    }
+
+	    const parsedHeaders = Array.isArray(headers) ? parseHeaders(headers) : headers;
+
+	    return this[kHandler].onRequestUpgrade?.(controller, statusCode, parsedHeaders, socket)
+	  }
+
+	  onResponseEnd (trailers) {
 	    this.onFinally();
 
 	    assert(!this.aborted);
@@ -3387,15 +3466,22 @@ function requireRequest$1 () {
 	      channels.trailers.publish({ request: this, trailers });
 	    }
 
+	    const controller = this[kController];
+	    if (controller) {
+	      controller.rawTrailers = trailers;
+	    }
+
+	    const parsedTrailers = Array.isArray(trailers) ? parseHeaders(trailers) : trailers;
+
 	    try {
-	      return this[kHandler].onComplete(trailers)
+	      return this[kHandler].onResponseEnd?.(controller, parsedTrailers)
 	    } catch (err) {
 	      // TODO (fix): This might be a bad idea?
-	      this.onError(err);
+	      this.onResponseError(err);
 	    }
 	  }
 
-	  onError (error) {
+	  onResponseError (error) {
 	    this.onFinally();
 
 	    if (channels.error.hasSubscribers) {
@@ -3407,7 +3493,9 @@ function requireRequest$1 () {
 	    }
 	    this.aborted = true;
 
-	    return this[kHandler].onError(error)
+	    const controller = this[kController];
+
+	    return this[kHandler].onResponseError?.(controller, error)
 	  }
 
 	  onFinally () {
@@ -3521,119 +3609,6 @@ function requireRequest$1 () {
 	return request$2;
 }
 
-var wrapHandler;
-var hasRequiredWrapHandler;
-
-function requireWrapHandler () {
-	if (hasRequiredWrapHandler) return wrapHandler;
-	hasRequiredWrapHandler = 1;
-
-	const { InvalidArgumentError } = requireErrors();
-
-	wrapHandler = class WrapHandler {
-	  #handler
-
-	  constructor (handler) {
-	    this.#handler = handler;
-	  }
-
-	  static wrap (handler) {
-	    // TODO (fix): More checks...
-	    return handler.onRequestStart ? handler : new WrapHandler(handler)
-	  }
-
-	  // Unwrap Interface
-
-	  onConnect (abort, context) {
-	    return this.#handler.onConnect?.(abort, context)
-	  }
-
-	  onResponseStarted () {
-	    return this.#handler.onResponseStarted?.()
-	  }
-
-	  onHeaders (statusCode, rawHeaders, resume, statusMessage) {
-	    return this.#handler.onHeaders?.(statusCode, rawHeaders, resume, statusMessage)
-	  }
-
-	  onUpgrade (statusCode, rawHeaders, socket) {
-	    return this.#handler.onUpgrade?.(statusCode, rawHeaders, socket)
-	  }
-
-	  onData (data) {
-	    return this.#handler.onData?.(data)
-	  }
-
-	  onComplete (trailers) {
-	    return this.#handler.onComplete?.(trailers)
-	  }
-
-	  onError (err) {
-	    if (!this.#handler.onError) {
-	      throw err
-	    }
-
-	    return this.#handler.onError?.(err)
-	  }
-
-	  // Wrap Interface
-
-	  onRequestStart (controller, context) {
-	    this.#handler.onConnect?.((reason) => controller.abort(reason), context);
-	  }
-
-	  onRequestUpgrade (controller, statusCode, headers, socket) {
-	    const rawHeaders = [];
-	    for (const [key, val] of Object.entries(headers)) {
-	      rawHeaders.push(Buffer.from(key, 'latin1'), toRawHeaderValue(val));
-	    }
-
-	    this.#handler.onUpgrade?.(statusCode, rawHeaders, socket);
-	  }
-
-	  onResponseStart (controller, statusCode, headers, statusMessage) {
-	    const rawHeaders = [];
-	    for (const [key, val] of Object.entries(headers)) {
-	      rawHeaders.push(Buffer.from(key, 'latin1'), toRawHeaderValue(val));
-	    }
-
-	    if (this.#handler.onHeaders?.(statusCode, rawHeaders, () => controller.resume(), statusMessage) === false) {
-	      controller.pause();
-	    }
-	  }
-
-	  onResponseData (controller, data) {
-	    if (this.#handler.onData?.(data) === false) {
-	      controller.pause();
-	    }
-	  }
-
-	  onResponseEnd (controller, trailers) {
-	    const rawTrailers = [];
-	    for (const [key, val] of Object.entries(trailers)) {
-	      rawTrailers.push(Buffer.from(key, 'latin1'), toRawHeaderValue(val));
-	    }
-
-	    this.#handler.onComplete?.(rawTrailers);
-	  }
-
-	  onResponseError (controller, err) {
-	    if (!this.#handler.onError) {
-	      throw new InvalidArgumentError('invalid onError method')
-	    }
-
-	    this.#handler.onError?.(err);
-	  }
-	};
-
-	function toRawHeaderValue (value) {
-	  return Array.isArray(value)
-	    ? value.map((item) => Buffer.from(item, 'latin1'))
-	    : Buffer.from(value, 'latin1')
-	}
-	return wrapHandler;
-}
-
 var dispatcher;
 var hasRequiredDispatcher;
 
@@ -3641,9 +3616,6 @@ function requireDispatcher () {
 	if (hasRequiredDispatcher) return dispatcher;
 	hasRequiredDispatcher = 1;
 	const EventEmitter = require$$0$1;
-	const WrapHandler = requireWrapHandler();
-
-	const wrapInterceptor = (dispatch) => (opts, handler) => dispatch(opts, WrapHandler.wrap(handler));
 
 	class Dispatcher extends EventEmitter {
 	  dispatch () {
@@ -3673,7 +3645,6 @@ function requireDispatcher () {
 	      }
 
 	      dispatch = interceptor(dispatch);
-	      dispatch = wrapInterceptor(dispatch);
 
 	      if (dispatch == null || typeof dispatch !== 'function' || dispatch.length !== 2) {
 	        throw new TypeError('invalid interceptor')
@@ -3690,114 +3661,6 @@ function requireDispatcher () {
 	return dispatcher;
 }
 
-var unwrapHandler;
-var hasRequiredUnwrapHandler;
-
-function requireUnwrapHandler () {
-	if (hasRequiredUnwrapHandler) return unwrapHandler;
-	hasRequiredUnwrapHandler = 1;
-
-	const { parseHeaders } = requireUtil$5();
-	const { InvalidArgumentError } = requireErrors();
-
-	const kResume = Symbol('resume');
-
-	class UnwrapController {
-	  #paused = false
-	  #reason = null
-	  #aborted = false
-	  #abort
-
-	  [kResume] = null
-
-	  constructor (abort) {
-	    this.#abort = abort;
-	  }
-
-	  pause () {
-	    this.#paused = true;
-	  }
-
-	  resume () {
-	    if (this.#paused) {
-	      this.#paused = false;
-	      this[kResume]?.();
-	    }
-	  }
-
-	  abort (reason) {
-	    if (!this.#aborted) {
-	      this.#aborted = true;
-	      this.#reason = reason;
-	      this.#abort(reason);
-	    }
-	  }
-
-	  get aborted () {
-	    return this.#aborted
-	  }
-
-	  get reason () {
-	    return this.#reason
-	  }
-
-	  get paused () {
-	    return this.#paused
-	  }
-	}
-
-	unwrapHandler = class UnwrapHandler {
-	  #handler
-	  #controller
-
-	  constructor (handler) {
-	    this.#handler = handler;
-	  }
-
-	  static unwrap (handler) {
-	    // TODO (fix): More checks...
-	    return !handler.onRequestStart ? handler : new UnwrapHandler(handler)
-	  }
-
-	  onConnect (abort, context) {
-	    this.#controller = new UnwrapController(abort);
-	    this.#handler.onRequestStart?.(this.#controller, context);
-	  }
-
-	  onResponseStarted () {
-	    return this.#handler.onResponseStarted?.()
-	  }
-
-	  onUpgrade (statusCode, rawHeaders, socket) {
-	    this.#handler.onRequestUpgrade?.(this.#controller, statusCode, parseHeaders(rawHeaders), socket);
-	  }
-
-	  onHeaders (statusCode, rawHeaders, resume, statusMessage) {
-	    this.#controller[kResume] = resume;
-	    this.#handler.onResponseStart?.(this.#controller, statusCode, parseHeaders(rawHeaders), statusMessage);
-	    return !this.#controller.paused
-	  }
-
-	  onData (data) {
-	    this.#handler.onResponseData?.(this.#controller, data);
-	    return !this.#controller.paused
-	  }
-
-	  onComplete (rawTrailers) {
-	    this.#handler.onResponseEnd?.(this.#controller, parseHeaders(rawTrailers));
-	  }
-
-	  onError (err) {
-	    if (!this.#handler.onResponseError) {
-	      throw new InvalidArgumentError('invalid onError method')
-	    }
-
-	    this.#handler.onResponseError?.(this.#controller, err);
-	  }
-	};
-	return unwrapHandler;
-}
-
 var dispatcherBase;
 var hasRequiredDispatcherBase;
 
@@ -3806,7 +3669,6 @@ function requireDispatcherBase () {
 	hasRequiredDispatcherBase = 1;
 
 	const Dispatcher = requireDispatcher();
-	const UnwrapHandler = requireUnwrapHandler();
 	const {
 	  ClientDestroyedError,
 	  ClientClosedError,
@@ -3939,8 +3801,6 @@ function requireDispatcherBase () {
 	      throw new InvalidArgumentError('handler must be an object')
 	    }
 
-	    handler = UnwrapHandler.unwrap(handler);
-
 	    try {
 	      if (!opts || typeof opts !== 'object') {
 	        throw new InvalidArgumentError('opts must be an object.')
@@ -3956,11 +3816,11 @@ function requireDispatcherBase () {
 
 	      return this[kDispatch](opts, handler)
 	    } catch (err) {
-	      if (typeof handler.onError !== 'function') {
+	      if (typeof handler.onResponseError !== 'function') {
 	        throw err
 	      }
 
-	      handler.onError(err);
+	      handler.onResponseError(null, err);
 
 	      return false
 	    }
@@ -4029,7 +3889,7 @@ function requireConnect () {
 	  const options = { path: socketPath, ...opts };
 	  const sessionCache = new SessionCache(maxCachedSessions == null ? 100 : maxCachedSessions);
 	  timeout = timeout == null ? 10e3 : timeout;
-	  allowH2 = allowH2 != null ? allowH2 : false;
+	  allowH2 = allowH2 != null ? allowH2 : true;
 	  return function connect ({ hostname, host, protocol, port, servername, localAddress, httpSocket }, callback) {
 	    let socket;
 	    if (protocol === 'https:') {
@@ -10393,7 +10253,7 @@ function requireClientH1 () {
 	    client.emit('disconnect', client[kUrl], [client], new InformationalError('upgrade'));
 
 	    try {
-	      request.onUpgrade(statusCode, headers, socket);
+	      request.onRequestUpgrade(statusCode, headers, socket);
 	    } catch (err) {
 	      util.destroy(socket, err);
 	    }
@@ -10491,7 +10351,7 @@ function requireClientH1 () {
 	      socket[kReset] = true;
 	    }
 
-	    const pause = request.onHeaders(statusCode, headers, this.resume, statusText) === false;
+	    const pause = request.onResponseStart(statusCode, headers, this.resume, statusText) === false;
 
 	    if (request.aborted) {
 	      return -1
@@ -10543,7 +10403,7 @@ function requireClientH1 () {
 
 	    this.bytesRead += buf.length;
 
-	    if (request.onData(buf) === false) {
+	    if (request.onResponseData(buf) === false) {
 	      return constants.ERROR.PAUSED
 	    }
 
@@ -10589,7 +10449,7 @@ function requireClientH1 () {
 	      return -1
 	    }
 
-	    request.onComplete(headers);
+	    request.onResponseEnd(headers);
 
 	    client[kQueue][client[kRunningIdx]++] = null;
 
@@ -10964,7 +10824,7 @@ function requireClientH1 () {
 	  };
 
 	  try {
-	    request.onConnect(abort);
+	    request.onRequestStart(abort, null);
 	  } catch (err) {
 	    util.errorRequest(client, request, err);
 	  }
@@ -11998,7 +11858,7 @@ function requireClientH2 () {
 	  try {
 	    // We are already connected, streams are pending.
 	    // We can call on connect, and wait for abort
-	    request.onConnect(abort);
+	    request.onRequestStart(abort, null);
 	  } catch (err) {
 	    util.errorRequest(client, request, err);
 	  }
@@ -12038,7 +11898,7 @@ function requireClientH2 () {
 	      stream.once('response', (headers, _flags) => {
 	        const { [HTTP2_HEADER_STATUS]: statusCode, ...realHeaders } = headers;
 
-	        request.onUpgrade(statusCode, parseH2Headers(realHeaders), stream);
+	        request.onRequestUpgrade(statusCode, parseH2Headers(realHeaders), stream);
 
 	        ++session[kOpenStreams];
 	        client[kQueue][client[kRunningIdx]++] = null;
@@ -12072,7 +11932,7 @@ function requireClientH2 () {
 	    stream.on('response', headers => {
 	      const { [HTTP2_HEADER_STATUS]: statusCode, ...realHeaders } = headers;
 
-	      request.onUpgrade(statusCode, parseH2Headers(realHeaders), stream);
+	      request.onRequestUpgrade(statusCode, parseH2Headers(realHeaders), stream);
 	      ++session[kOpenStreams];
 	      client[kQueue][client[kRunningIdx]++] = null;
 	    });
@@ -12201,7 +12061,7 @@ function requireClientH2 () {
 	      return
 	    }
 
-	    if (request.onHeaders(Number(statusCode), parseH2Headers(realHeaders), stream.resume.bind(stream), '') === false) {
+	    if (request.onResponseStart(Number(statusCode), parseH2Headers(realHeaders), stream.resume.bind(stream), '') === false) {
 	      stream.pause();
 	    }
 
@@ -12210,7 +12070,7 @@ function requireClientH2 () {
 	        return
 	      }
 
-	      if (request.onData(chunk) === false) {
+	      if (request.onResponseData(chunk) === false) {
 	        stream.pause();
 	      }
 	    });
@@ -12221,7 +12081,7 @@ function requireClientH2 () {
 	    // If we received a response, this is a normal completion
 	    if (responseReceived) {
 	      if (!request.aborted && !request.completed) {
-	        request.onComplete({});
+	        request.onResponseEnd({});
 	      }
 
 	      client[kQueue][client[kRunningIdx]++] = null;
@@ -12275,8 +12135,7 @@ function requireClientH2 () {
 	      return
 	    }
 
-	    stream.removeAllListeners('data');
-	    request.onComplete(trailers);
+	    request.onResponseEnd(trailers);
 	  });
 
 	  return true
@@ -13458,7 +13317,7 @@ function requirePoolBase () {
 	      if (!item) {
 	        break
 	      }
-	      item.handler.onError(err);
+	      item.handler.onResponseError(null, err);
 	    }
 
 	    const destroyAll = new Array(this[kClients].length);
@@ -14192,6 +14051,115 @@ function requireAgent () {
 
 	agent = Agent;
 	return agent;
+}
+
+var dispatcher1Wrapper;
+var hasRequiredDispatcher1Wrapper;
+
+function requireDispatcher1Wrapper () {
+	if (hasRequiredDispatcher1Wrapper) return dispatcher1Wrapper;
+	hasRequiredDispatcher1Wrapper = 1;
+
+	const Dispatcher = requireDispatcher();
+	const { InvalidArgumentError } = requireErrors();
+	const { toRawHeaders } = requireUtil$5();
+
+	class LegacyHandlerWrapper {
+	  #handler
+
+	  constructor (handler) {
+	    this.#handler = handler;
+	  }
+
+	  onRequestStart (controller, context) {
+	    this.#handler.onConnect?.((reason) => controller.abort(reason), context);
+	  }
+
+	  onRequestUpgrade (controller, statusCode, headers, socket) {
+	    const rawHeaders = controller?.rawHeaders ?? toRawHeaders(headers ?? {});
+	    this.#handler.onUpgrade?.(statusCode, rawHeaders, socket);
+	  }
+
+	  onResponseStart (controller, statusCode, headers, statusMessage) {
+	    const rawHeaders = controller?.rawHeaders ?? toRawHeaders(headers ?? {});
+
+	    if (this.#handler.onHeaders?.(statusCode, rawHeaders, () => controller.resume(), statusMessage) === false) {
+	      controller.pause();
+	    }
+	  }
+
+	  onResponseData (controller, chunk) {
+	    if (this.#handler.onData?.(chunk) === false) {
+	      controller.pause();
+	    }
+	  }
+
+	  onResponseEnd (controller, trailers) {
+	    const rawTrailers = controller?.rawTrailers ?? toRawHeaders(trailers ?? {});
+	    this.#handler.onComplete?.(rawTrailers);
+	  }
+
+	  onResponseError (_controller, err) {
+	    if (!this.#handler.onError) {
+	      throw err
+	    }
+
+	    this.#handler.onError(err);
+	  }
+
+	  onBodySent (chunk) {
+	    this.#handler.onBodySent?.(chunk);
+	  }
+
+	  onRequestSent () {
+	    this.#handler.onRequestSent?.();
+	  }
+
+	  onResponseStarted () {
+	    this.#handler.onResponseStarted?.();
+	  }
+	}
+
+	class Dispatcher1Wrapper extends Dispatcher {
+	  #dispatcher
+
+	  constructor (dispatcher) {
+	    super();
+
+	    if (!dispatcher || typeof dispatcher.dispatch !== 'function') {
+	      throw new InvalidArgumentError('Argument dispatcher must implement dispatch')
+	    }
+
+	    this.#dispatcher = dispatcher;
+	  }
+
+	  static wrapHandler (handler) {
+	    if (!handler || typeof handler !== 'object') {
+	      throw new InvalidArgumentError('handler must be an object')
+	    }
+
+	    if (typeof handler.onRequestStart === 'function') {
+	      return handler
+	    }
+
+	    return new LegacyHandlerWrapper(handler)
+	  }
+
+	  dispatch (opts, handler) {
+	    return this.#dispatcher.dispatch(opts, Dispatcher1Wrapper.wrapHandler(handler))
+	  }
+
+	  close (...args) {
+	    return this.#dispatcher.close(...args)
+	  }
+
+	  destroy (...args) {
+	    return this.#dispatcher.destroy(...args)
+	  }
+	}
+
+	dispatcher1Wrapper = Dispatcher1Wrapper;
+	return dispatcher1Wrapper;
 }
 
 var socks5Utils;
@@ -15138,15 +15106,15 @@ function requireProxyAgent () {
 	  }
 
 	  [kDispatch] (opts, handler) {
-	    const onHeaders = handler.onHeaders;
-	    handler.onHeaders = function (statusCode, data, resume) {
+	    const onResponseStart = handler.onResponseStart;
+	    handler.onResponseStart = function (controller, statusCode, data, statusMessage) {
 	      if (statusCode === 407) {
-	        if (typeof handler.onError === 'function') {
-	          handler.onError(new InvalidArgumentError('Proxy Authentication Required (407)'));
+	        if (typeof handler.onResponseError === 'function') {
+	          handler.onResponseError(controller, new InvalidArgumentError('Proxy Authentication Required (407)'));
 	        }
 	        return
 	      }
-	      if (onHeaders) onHeaders.call(this, statusCode, data, resume);
+	      if (onResponseStart) onResponseStart.call(this, controller, statusCode, data, statusMessage);
 	    };
 
 	    // Rewrite request as an HTTP1 Proxy request, without tunneling.
@@ -15420,6 +15388,22 @@ function requireEnvHttpProxyAgent () {
 	  'https:': 443
 	};
 
+	/**
+	 * Normalizes a proxy URL by prepending a scheme if one is missing.
+	 * This matches the behavior of curl and Go's httpproxy package, which
+	 * assume http:// for scheme-less proxy values.
+	 *
+	 * @param {string} proxyUrl - The proxy URL to normalize
+	 * @param {string} defaultScheme - The scheme to prepend if missing ('http' or 'https')
+	 * @returns {string} The normalized proxy URL
+	 */
+	function normalizeProxyUrl (proxyUrl, defaultScheme) {
+	  if (!proxyUrl) return proxyUrl
+	  // If the value already contains a scheme (e.g. http://, https://, socks5://), return as-is
+	  if (/^[a-z][a-z0-9+\-.]*:\/\//i.test(proxyUrl)) return proxyUrl
+	  return `${defaultScheme}://${proxyUrl}`
+	}
+
 	class EnvHttpProxyAgent extends DispatcherBase {
 	  #noProxyValue = null
 	  #noProxyEntries = null
@@ -15433,14 +15417,20 @@ function requireEnvHttpProxyAgent () {
 
 	    this[kNoProxyAgent] = new Agent(agentOpts);
 
-	    const HTTP_PROXY = httpProxy ?? process.env.http_proxy ?? process.env.HTTP_PROXY;
+	    const HTTP_PROXY = normalizeProxyUrl(
+	      httpProxy ?? process.env.http_proxy ?? process.env.HTTP_PROXY,
+	      'http'
+	    );
 	    if (HTTP_PROXY) {
 	      this[kHttpProxyAgent] = new ProxyAgent({ ...agentOpts, uri: HTTP_PROXY });
 	    } else {
 	      this[kHttpProxyAgent] = this[kNoProxyAgent];
 	    }
 
-	    const HTTPS_PROXY = httpsProxy ?? process.env.https_proxy ?? process.env.HTTPS_PROXY;
+	    const HTTPS_PROXY = normalizeProxyUrl(
+	      httpsProxy ?? process.env.https_proxy ?? process.env.HTTPS_PROXY,
+	      'https'
+	    );
 	    if (HTTPS_PROXY) {
 	      this[kHttpsProxyAgent] = new ProxyAgent({ ...agentOpts, uri: HTTPS_PROXY });
 	    } else {
@@ -15567,7 +15557,6 @@ function requireRetryHandler () {
 
 	const { kRetryHandlerDefaultRetry } = requireSymbols();
 	const { RequestRetryError } = requireErrors();
-	const WrapHandler = requireWrapHandler();
 	const {
 	  isDisturbed,
 	  parseRangeHeader,
@@ -15599,7 +15588,7 @@ function requireRetryHandler () {
 
 	    this.error = null;
 	    this.dispatch = dispatch;
-	    this.handler = WrapHandler.wrap(handler);
+	    this.handler = handler;
 	    this.opts = { ...dispatchOpts, body: wrapRequestBody(opts.body) };
 	    this.retryOpts = {
 	      throwOnError: throwOnError ?? true,
@@ -16713,6 +16702,7 @@ function requireApiRequest () {
 	    this.body = body;
 	    this.trailers = {};
 	    this.context = null;
+	    this.controller = null;
 	    this.onInfo = onInfo || null;
 	    this.highWaterMark = highWaterMark;
 	    this.reason = null;
@@ -16732,36 +16722,40 @@ function requireApiRequest () {
 	    }
 	  }
 
-	  onConnect (abort, context) {
+	  onRequestStart (controller, context) {
 	    if (this.reason) {
-	      abort(this.reason);
+	      controller.abort(this.reason);
 	      return
 	    }
 
 	    assert(this.callback);
 
-	    this.abort = abort;
+	    this.controller = controller;
+	    this.abort = (reason) => controller.abort(reason);
 	    this.context = context;
 	  }
 
-	  onHeaders (statusCode, rawHeaders, resume, statusMessage) {
-	    const { callback, opaque, abort, context, responseHeaders, highWaterMark } = this;
+	  onResponseStart (controller, statusCode, headers, statusText) {
+	    const { callback, opaque, context, responseHeaders, highWaterMark } = this;
 
-	    const headers = responseHeaders === 'raw' ? util.parseRawHeaders(rawHeaders) : util.parseHeaders(rawHeaders);
+	    const rawHeaders = controller?.rawHeaders;
+	    const responseHeaderData = responseHeaders === 'raw'
+	      ? (Array.isArray(rawHeaders) ? util.parseRawHeaders(rawHeaders) : [])
+	      : headers;
 
 	    if (statusCode < 200) {
 	      if (this.onInfo) {
-	        this.onInfo({ statusCode, headers });
+	        this.onInfo({ statusCode, headers: responseHeaderData });
 	      }
 	      return
 	    }
 
-	    const parsedHeaders = responseHeaders === 'raw' ? util.parseHeaders(rawHeaders) : headers;
-	    const contentType = parsedHeaders['content-type'];
-	    const contentLength = parsedHeaders['content-length'];
+	    const parsedHeaders = headers;
+	    const contentType = parsedHeaders?.['content-type'];
+	    const contentLength = parsedHeaders?.['content-length'];
 	    const res = new Readable({
-	      resume,
-	      abort,
+	      resume: () => controller.resume(),
+	      abort: (reason) => controller.abort(reason),
 	      contentType,
 	      contentLength: this.method !== 'HEAD' && contentLength
 	        ? Number(contentLength)
@@ -16780,8 +16774,8 @@ function requireApiRequest () {
 	      try {
 	        this.runInAsyncScope(callback, null, null, {
 	          statusCode,
-	          statusText: statusMessage,
-	          headers,
+	          statusText,
+	          headers: responseHeaderData,
 	          trailers: this.trailers,
 	          opaque,
 	          body: res,
@@ -16803,16 +16797,35 @@ function requireApiRequest () {
 	    }
 	  }
 
-	  onData (chunk) {
-	    return this.res.push(chunk)
+	  onResponseData (controller, chunk) {
+	    if (!this.res) {
+	      return
+	    }
+
+	    if (this.res.push(chunk) === false) {
+	      controller.pause();
+	    }
 	  }
 
-	  onComplete (trailers) {
-	    util.parseHeaders(trailers, this.trailers);
-	    this.res.push(null);
+	  onResponseEnd (_controller, trailers) {
+	    if (trailers && typeof trailers === 'object') {
+	      for (const key of Object.keys(trailers)) {
+	        if (key === '__proto__') {
+	          Object.defineProperty(this.trailers, key, {
+	            value: trailers[key],
+	            enumerable: true,
+	            configurable: true,
+	            writable: true
+	          });
+	        } else {
+	          this.trailers[key] = trailers[key];
+	        }
+	      }
+	    }
+	    this.res?.push(null);
 	  }
 
-	  onError (err) {
+	  onResponseError (_controller, err) {
 	    const { res, callback, body, opaque } = this;
 
 	    if (callback) {
@@ -17001,39 +17014,44 @@ function requireApiStream () {
 	    this.res = null;
 	    this.abort = null;
 	    this.context = null;
+	    this.controller = null;
 	    this.trailers = null;
 	    this.body = body;
 	    this.onInfo = onInfo || null;
 
 	    if (util.isStream(body)) {
 	      body.on('error', (err) => {
-	        this.onError(err);
+	        this.onResponseError(this.controller, err);
 	      });
 	    }
 
 	    addSignal(this, signal);
 	  }
 
-	  onConnect (abort, context) {
+	  onRequestStart (controller, context) {
 	    if (this.reason) {
-	      abort(this.reason);
+	      controller.abort(this.reason);
 	      return
 	    }
 
 	    assert(this.callback);
 
-	    this.abort = abort;
+	    this.controller = controller;
+	    this.abort = (reason) => controller.abort(reason);
 	    this.context = context;
 	  }
 
-	  onHeaders (statusCode, rawHeaders, resume, statusMessage) {
+	  onResponseStart (controller, statusCode, headers, _statusMessage) {
 	    const { factory, opaque, context, responseHeaders } = this;
 
-	    const headers = responseHeaders === 'raw' ? util.parseRawHeaders(rawHeaders) : util.parseHeaders(rawHeaders);
+	    const rawHeaders = controller?.rawHeaders;
+	    const responseHeaderData = responseHeaders === 'raw'
+	      ? (Array.isArray(rawHeaders) ? util.parseRawHeaders(rawHeaders) : [])
+	      : headers;
 
 	    if (statusCode < 200) {
 	      if (this.onInfo) {
-	        this.onInfo({ statusCode, headers });
+	        this.onInfo({ statusCode, headers: responseHeaderData });
 	      }
 	      return
 	    }
@@ -17046,7 +17064,7 @@ function requireApiStream () {
 
 	    const res = this.runInAsyncScope(factory, null, {
 	      statusCode,
-	      headers,
+	      headers: responseHeaderData,
 	      opaque,
 	      context
 	    });
@@ -17077,7 +17095,7 @@ function requireApiStream () {
 	      }
 	    });
 
-	    res.on('drain', resume);
+	    res.on('drain', () => controller.resume());
 
 	    this.res = res;
 
@@ -17085,16 +17103,24 @@ function requireApiStream () {
 	      ? res.writableNeedDrain
 	      : res._writableState?.needDrain;
 
-	    return needDrain !== true
+	    if (needDrain === true) {
+	      controller.pause();
+	    }
 	  }
 
-	  onData (chunk) {
+	  onResponseData (controller, chunk) {
 	    const { res } = this;
 
-	    return res ? res.write(chunk) : true
+	    if (!res) {
+	      return
+	    }
+
+	    if (res.write(chunk) === false) {
+	      controller.pause();
+	    }
 	  }
 
-	  onComplete (trailers) {
+	  onResponseEnd (_controller, trailers) {
 	    const { res } = this;
 
 	    removeSignal(this);
@@ -17103,12 +17129,14 @@ function requireApiStream () {
 	      return
 	    }
 
-	    this.trailers = util.parseHeaders(trailers);
+	    if (trailers && typeof trailers === 'object') {
+	      this.trailers = trailers;
+	    }
 
 	    res.end();
 	  }
 
-	  onError (err) {
+	  onResponseError (_controller, err) {
 	    const { res, callback, opaque, body } = this;
 
 	    removeSignal(this);
@@ -17311,40 +17339,46 @@ function requireApiPipeline () {
 	    addSignal(this, signal);
 	  }
 
-	  onConnect (abort, context) {
+	  onRequestStart (controller, context) {
 	    const { res } = this;
 
 	    if (this.reason) {
-	      abort(this.reason);
+	      controller.abort(this.reason);
 	      return
 	    }
 
 	    assert(!res, 'pipeline cannot be retried');
 
-	    this.abort = abort;
+	    this.abort = (reason) => controller.abort(reason);
 	    this.context = context;
 	  }
 
-	  onHeaders (statusCode, rawHeaders, resume) {
+	  onResponseStart (controller, statusCode, headers, _statusMessage) {
 	    const { opaque, handler, context } = this;
 
 	    if (statusCode < 200) {
 	      if (this.onInfo) {
-	        const headers = this.responseHeaders === 'raw' ? util.parseRawHeaders(rawHeaders) : util.parseHeaders(rawHeaders);
-	        this.onInfo({ statusCode, headers });
+	        const rawHeaders = controller?.rawHeaders;
+	        const responseHeaders = this.responseHeaders === 'raw'
+	          ? (Array.isArray(rawHeaders) ? util.parseRawHeaders(rawHeaders) : [])
+	          : headers;
+	        this.onInfo({ statusCode, headers: responseHeaders });
 	      }
 	      return
 	    }
 
-	    this.res = new PipelineResponse(resume);
+	    this.res = new PipelineResponse(() => controller.resume());
 
 	    let body;
 	    try {
 	      this.handler = null;
-	      const headers = this.responseHeaders === 'raw' ? util.parseRawHeaders(rawHeaders) : util.parseHeaders(rawHeaders);
+	      const rawHeaders = controller?.rawHeaders;
+	      const responseHeaders = this.responseHeaders === 'raw'
+	        ? (Array.isArray(rawHeaders) ? util.parseRawHeaders(rawHeaders) : [])
+	        : headers;
 	      body = this.runInAsyncScope(handler, null, {
 	        statusCode,
-	        headers,
+	        headers: responseHeaders,
 	        opaque,
 	        body: this.res,
 	        context
@@ -17387,17 +17421,20 @@ function requireApiPipeline () {
 	    this.body = body;
 	  }
 
-	  onData (chunk) {
+	  onResponseData (controller, chunk) {
 	    const { res } = this;
-	    return res.push(chunk)
+
+	    if (res.push(chunk) === false) {
+	      controller.pause();
+	    }
 	  }
 
-	  onComplete (trailers) {
+	  onResponseEnd (_controller, _trailers) {
 	    const { res } = this;
 	    res.push(null);
 	  }
 
-	  onError (err) {
+	  onResponseError (_controller, err) {
 	    const { ret } = this;
 	    this.handler = null;
 	    util.destroy(ret, err);
@@ -17459,23 +17496,23 @@ function requireApiUpgrade () {
 	    addSignal(this, signal);
 	  }
 
-	  onConnect (abort, context) {
+	  onRequestStart (controller, context) {
 	    if (this.reason) {
-	      abort(this.reason);
+	      controller.abort(this.reason);
 	      return
 	    }
 
 	    assert(this.callback);
 
-	    this.abort = abort;
-	    this.context = null;
+	    this.abort = (reason) => controller.abort(reason);
+	    this.context = context;
 	  }
 
-	  onHeaders () {
+	  onResponseStart () {
 	    throw new SocketError('bad upgrade', null)
 	  }
 
-	  onUpgrade (statusCode, rawHeaders, socket) {
+	  onRequestUpgrade (controller, statusCode, headers, socket) {
 	    assert(socket[kHTTP2Stream] === true ? statusCode === 200 : statusCode === 101);
 
 	    const { callback, opaque, context } = this;
@@ -17483,16 +17520,21 @@ function requireApiUpgrade () {
 	    removeSignal(this);
 
 	    this.callback = null;
-	    const headers = this.responseHeaders === 'raw' ? util.parseRawHeaders(rawHeaders) : util.parseHeaders(rawHeaders);
+
+	    const rawHeaders = controller?.rawHeaders;
+	    const responseHeaders = this.responseHeaders === 'raw'
+	      ? (Array.isArray(rawHeaders) ? util.parseRawHeaders(rawHeaders) : [])
+	      : headers;
+
 	    this.runInAsyncScope(callback, null, null, {
-	      headers,
+	      headers: responseHeaders,
 	      socket,
 	      opaque,
 	      context
 	    });
 	  }
 
-	  onError (err) {
+	  onResponseError (_controller, err) {
 	    const { callback, opaque } = this;
 
 	    removeSignal(this);
@@ -17522,7 +17564,6 @@ function requireApiUpgrade () {
 	      method: opts.method || 'GET',
 	      upgrade: opts.protocol || 'Websocket'
 	    };
-
 	    this.dispatch(upgradeOpts, upgradeHandler);
 	  } catch (err) {
 	    if (typeof callback !== 'function') {
@@ -17576,45 +17617,48 @@ function requireApiConnect () {
 	    addSignal(this, signal);
 	  }
 
-	  onConnect (abort, context) {
+	  onRequestStart (controller, context) {
 	    if (this.reason) {
-	      abort(this.reason);
+	      controller.abort(this.reason);
 	      return
 	    }
 
 	    assert(this.callback);
 
-	    this.abort = abort;
+	    this.abort = (reason) => controller.abort(reason);
 	    this.context = context;
 	  }
 
-	  onHeaders () {
+	  onResponseStart () {
 	    throw new SocketError('bad connect', null)
 	  }
 
-	  onUpgrade (statusCode, rawHeaders, socket) {
+	  onRequestUpgrade (controller, statusCode, headers, socket) {
 	    const { callback, opaque, context } = this;
 
 	    removeSignal(this);
 
 	    this.callback = null;
 
-	    let headers = rawHeaders;
+	    let responseHeaders = headers;
+	    const rawHeaders = controller?.rawHeaders;
 	    // Indicates is an HTTP2Session
-	    if (headers != null) {
-	      headers = this.responseHeaders === 'raw' ? util.parseRawHeaders(rawHeaders) : util.parseHeaders(rawHeaders);
+	    if (responseHeaders != null) {
+	      responseHeaders = this.responseHeaders === 'raw'
+	        ? (Array.isArray(rawHeaders) ? util.parseRawHeaders(rawHeaders) : [])
+	        : headers;
 	    }
 
 	    this.runInAsyncScope(callback, null, null, {
 	      statusCode,
-	      headers,
+	      headers: responseHeaders,
 	      socket,
 	      opaque,
 	      context
 	    });
 	  }
 
-	  onError (err) {
+	  onResponseError (_controller, err) {
 	    const { callback, opaque } = this;
 
 	    removeSignal(this);
@@ -17640,7 +17684,6 @@ function requireApiConnect () {
 	  try {
 	    const connectHandler = new ConnectHandler(opts, callback);
 	    const connectOptions = { ...opts, method: 'CONNECT' };
-
 	    this.dispatch(connectOptions, connectHandler);
 	  } catch (err) {
 	    if (typeof callback !== 'function') {
@@ -17762,7 +17805,7 @@ function requireMockUtils () {
 	  kGetNetConnect,
 	  kTotalDispatchCount
 	} = requireMockSymbols();
-	const { serializePathWithQuery } = requireUtil$5();
+	const { serializePathWithQuery, parseHeaders } = requireUtil$5();
 	const { STATUS_CODES } = require$$2;
 	const {
 	  types: {
@@ -18064,7 +18107,7 @@ function requireMockUtils () {
 	  // If specified, trigger dispatch error
 	  if (error !== null) {
 	    deleteMockDispatch(this[kDispatches], key);
-	    handler.onError(error);
+	    handler.onResponseError(null, error);
 	    return true
 	  }
 
@@ -18072,24 +18115,35 @@ function requireMockUtils () {
 	  let aborted = false;
 	  let timer = null;
 
-	  function abort (err) {
-	    if (aborted) {
-	      return
+	  // Create the controller early so abort can use it
+	  const controller = {
+	    paused: false,
+	    rawHeaders: null,
+	    rawTrailers: null,
+	    pause () {
+	      this.paused = true;
+	    },
+	    resume () {
+	      this.paused = false;
+	    },
+	    abort: (reason) => {
+	      if (aborted) {
+	        return
+	      }
+	      aborted = true;
+
+	      // Clear the pending delayed response if any
+	      if (timer !== null) {
+	        clearTimeout(timer);
+	        timer = null;
+	      }
+
+	      handler.onResponseError?.(controller, reason);
 	    }
-	    aborted = true;
+	  };
 
-	    // Clear the pending delayed response if any
-	    if (timer !== null) {
-	      clearTimeout(timer);
-	      timer = null;
-	    }
-
-	    // Notify the handler of the abort
-	    handler.onError(err);
-	  }
-
-	  // Call onConnect to allow the handler to register the abort callback
-	  handler.onConnect?.(abort, null);
+	  // Call onRequestStart to allow the handler to receive the controller
+	  handler.onRequestStart?.(controller, null);
 
 	  // Handle the request with a delay if necessary
 	  if (typeof delay === 'number' && delay > 0) {
@@ -18134,13 +18188,15 @@ function requireMockUtils () {
 	    const responseHeaders = generateKeyValues(headers);
 	    const responseTrailers = generateKeyValues(trailers);
 
-	    handler.onHeaders?.(statusCode, responseHeaders, resume, getStatusText(statusCode));
-	    handler.onData?.(Buffer.from(responseData));
-	    handler.onComplete?.(responseTrailers);
+	    // Update the controller with response data
+	    controller.rawHeaders = responseHeaders;
+	    controller.rawTrailers = responseTrailers;
+
+	    handler.onResponseStart?.(controller, statusCode, parseHeaders(responseHeaders), getStatusText(statusCode));
+	    handler.onResponseData?.(controller, Buffer.from(responseData));
+	    handler.onResponseEnd?.(controller, parseHeaders(responseTrailers));
 	    deleteMockDispatch(mockDispatches, key);
 	  }
-
-	  function resume () {}
 
 	  return true
 	}
@@ -19930,8 +19986,8 @@ function requireSnapshotAgent () {
 	const Agent = requireAgent();
 	const MockAgent = requireMockAgent();
 	const { SnapshotRecorder } = requireSnapshotRecorder();
-	const WrapHandler = requireWrapHandler();
 	const { InvalidArgumentError, UndiciError } = requireErrors();
+	const util = requireUtil$5();
 	const { validateSnapshotMode } = requireSnapshotUtils();
 
 	const kSnapshotRecorder = Symbol('kSnapshotRecorder');
@@ -20006,7 +20062,6 @@ function requireSnapshotAgent () {
 	  }
 
 	  dispatch (opts, handler) {
-	    handler = WrapHandler.wrap(handler);
 	    const mode = this[kSnapshotMode];
 
 	    // Check if URL should be excluded (pass through without mocking/recording)
@@ -20034,8 +20089,8 @@ function requireSnapshotAgent () {
 	      } else {
 	        // Playback mode but no snapshot found
 	        const error = new UndiciError(`No snapshot found for ${opts.method || 'GET'} ${opts.path}`);
-	        if (handler.onError) {
-	          handler.onError(error);
+	        if (handler.onResponseError) {
+	          handler.onResponseError(null, error);
 	          return
 	        }
 	        throw error
@@ -20100,6 +20155,10 @@ function requireSnapshotAgent () {
 	        })
 	          .then(() => handler.onResponseEnd(controller, trailers))
 	          .catch((error) => handler.onResponseError(controller, error));
+	      },
+
+	      onResponseError (controller, error) {
+	        return handler.onResponseError(controller, error)
 	      }
 	    };
 
@@ -20119,7 +20178,12 @@ function requireSnapshotAgent () {
 	    try {
 	      const { response } = snapshot;
 
+	      const rawHeaders = response.headers ? util.toRawHeaders(response.headers) : [];
+	      const rawTrailers = response.trailers ? util.toRawHeaders(response.trailers) : [];
+
 	      const controller = {
+	        rawHeaders,
+	        rawTrailers,
 	        pause () { },
 	        resume () { },
 	        abort (reason) {
@@ -20133,7 +20197,7 @@ function requireSnapshotAgent () {
 
 	      handler.onRequestStart(controller);
 
-	      handler.onResponseStart(controller, response.statusCode, response.headers);
+	      handler.onResponseStart(controller, response.statusCode, response.headers, response.statusMessage);
 
 	      // Body is always stored as base64 string
 	      const body = Buffer.from(response.body, 'base64');
@@ -20141,7 +20205,7 @@ function requireSnapshotAgent () {
 
 	      handler.onResponseEnd(controller, response.trailers);
 	    } catch (error) {
-	      handler.onError?.(error);
+	      handler.onResponseError?.(null, error);
 	    }
 	  }
 
@@ -20290,9 +20354,13 @@ function requireGlobal () {
 
 	// We include a version number for the Dispatcher API. In case of breaking changes,
 	// this version number must be increased to avoid conflicts.
-	const globalDispatcher = Symbol.for('undici.globalDispatcher.1');
+	const globalDispatcher = Symbol.for('undici.globalDispatcher.2');
+	const legacyGlobalDispatcher = Symbol.for('undici.globalDispatcher.1');
 	const { InvalidArgumentError } = requireErrors();
 	const Agent = requireAgent();
+	const Dispatcher1Wrapper = requireDispatcher1Wrapper();
+
+	const nodeMajor = Number(process.versions.node.split('.', 1)[0]);
 
 	if (getGlobalDispatcher() === undefined) {
 	  setGlobalDispatcher(new Agent());
@@ -20302,12 +20370,24 @@ function requireGlobal () {
 	  if (!agent || typeof agent.dispatch !== 'function') {
 	    throw new InvalidArgumentError('Argument agent must implement Agent')
 	  }
+
 	  Object.defineProperty(globalThis, globalDispatcher, {
 	    value: agent,
 	    writable: true,
 	    enumerable: false,
 	    configurable: false
 	  });
+
+	  if (nodeMajor === 22) {
+	    const legacyAgent = agent instanceof Dispatcher1Wrapper ? agent : new Dispatcher1Wrapper(agent);
+
+	    Object.defineProperty(globalThis, legacyGlobalDispatcher, {
+	      value: legacyAgent,
+	      writable: true,
+	      enumerable: false,
+	      configurable: false
+	    });
+	  }
 	}
 
 	function getGlobalDispatcher () {
@@ -20347,7 +20427,6 @@ function requireDecoratorHandler () {
 	hasRequiredDecoratorHandler = 1;
 
 	const assert = require$$0$2;
-	const WrapHandler = requireWrapHandler();
 
 	/**
 	 * @deprecated
@@ -20362,7 +20441,7 @@ function requireDecoratorHandler () {
 	    if (typeof handler !== 'object' || handler === null) {
 	      throw new TypeError('handler must be an object')
 	    }
-	    this.#handler = WrapHandler.wrap(handler);
+	    this.#handler = handler;
 	  }
 
 	  onRequestStart (...args) {
@@ -22756,7 +22835,8 @@ function requireCacheHandler () {
 	      }
 	    }
 
-	    const deleteAt = determineDeleteAt(baseTime, cacheControlDirectives, absoluteStaleAt);
+	    const cachedAt = resAge ? now - resAge : now;
+	    const deleteAt = determineDeleteAt(baseTime, cachedAt, cacheControlDirectives, absoluteStaleAt);
 	    const strippedHeaders = stripNecessaryHeaders(resHeaders, cacheControlDirectives);
 
 	    /**
@@ -22768,7 +22848,7 @@ function requireCacheHandler () {
 	      headers: strippedHeaders,
 	      vary: varyDirectives,
 	      cacheControlDirectives,
-	      cachedAt: resAge ? now - resAge : now,
+	      cachedAt,
 	      staleAt: absoluteStaleAt,
 	      deleteAt
 	    };
@@ -23068,11 +23148,12 @@ function requireCacheHandler () {
 	}
 
 	/**
-	 * @param {number} now
+	 * @param {number} baseTime
+	 * @param {number} cachedAt
 	 * @param {import('../../types/cache-interceptor.d.ts').default.CacheControlDirectives} cacheControlDirectives
 	 * @param {number} staleAt
 	 */
-	function determineDeleteAt (now, cacheControlDirectives, staleAt) {
+	function determineDeleteAt (baseTime, cachedAt, cacheControlDirectives, staleAt) {
 	  let staleWhileRevalidate = -Infinity;
 	  let staleIfError = -Infinity;
 	  let immutable = -Infinity;
@@ -23086,15 +23167,21 @@ function requireCacheHandler () {
 	  }
 
 	  if (cacheControlDirectives.immutable && staleWhileRevalidate === -Infinity && staleIfError === -Infinity) {
-	    immutable = now + 31536000000;
+	    immutable = cachedAt + 31536000000;
 	  }
 
 	  // When no stale directives or immutable flag, add a revalidation buffer
 	  // equal to the freshness lifetime so the entry survives past staleAt long
 	  // enough to be revalidated instead of silently disappearing.
+	  //
+	  // Response Date headers only have second precision, so baseTime can trail the
+	  // actual cache insertion time by up to ~1s. Pad the buffer by that bounded
+	  // skew so short-lived entries do not disappear exactly when they should be
+	  // revalidated.
 	  if (staleWhileRevalidate === -Infinity && staleIfError === -Infinity && immutable === -Infinity) {
-	    const freshnessLifetime = staleAt - now;
-	    return staleAt + freshnessLifetime
+	    const freshnessLifetime = staleAt - baseTime;
+	    const datePrecisionPadding = Math.min(Math.max(cachedAt - baseTime, 0), 1000);
+	    return staleAt + freshnessLifetime + datePrecisionPadding
 	  }
 
 	  return Math.max(staleAt, staleWhileRevalidate, staleIfError, immutable)
@@ -23667,30 +23754,39 @@ function requireCache$1 () {
 	) {
 	  if (reqCacheControl?.['only-if-cached']) {
 	    let aborted = false;
+
+	    const controller = {
+	      paused: false,
+	      rawHeaders: [],
+	      rawTrailers: [],
+	      pause () {
+	        this.paused = true;
+	      },
+	      resume () {
+	        this.paused = false;
+	      },
+	      abort: (reason) => {
+	        aborted = true;
+	        handler.onResponseError?.(controller, reason ?? new AbortError());
+	      }
+	    };
+
 	    try {
-	      if (typeof handler.onConnect === 'function') {
-	        handler.onConnect(() => {
-	          aborted = true;
-	        });
+	      handler.onRequestStart?.(controller, null);
 
-	        if (aborted) {
-	          return
-	        }
+	      if (aborted) {
+	        return
 	      }
 
-	      if (typeof handler.onHeaders === 'function') {
-	        handler.onHeaders(504, [], nop, 'Gateway Timeout');
-	        if (aborted) {
-	          return
-	        }
+	      handler.onResponseStart?.(controller, 504, {}, 'Gateway Timeout');
+	      if (aborted) {
+	        return
 	      }
 
-	      if (typeof handler.onComplete === 'function') {
-	        handler.onComplete([]);
-	      }
+	      handler.onResponseEnd?.(controller, {});
 	    } catch (err) {
-	      if (typeof handler.onError === 'function') {
-	        handler.onError(err);
+	      if (typeof handler.onResponseError === 'function') {
+	        handler.onResponseError(controller, err);
 	      }
 	    }
 
@@ -23718,6 +23814,8 @@ function requireCache$1 () {
 	  assert(!stream.readableDidRead, 'stream should not be readableDidRead');
 
 	  const controller = {
+	    rawHeaders: [],
+	    rawTrailers: [],
 	    resume () {
 	      stream.resume();
 	    },
@@ -23769,6 +23867,8 @@ function requireCache$1 () {
 	    //  https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Warning
 	    headers.warning = '110 - "response is stale"';
 	  }
+
+	  controller.rawHeaders = util.toRawHeaders(headers);
 
 	  handler.onResponseStart?.(controller, result.statusCode, headers, result.statusMessage);
 
@@ -24226,6 +24326,33 @@ function requireDecompress () {
 
 	    // Remove compression headers since we're decompressing
 	    const { 'content-encoding': _, 'content-length': __, ...newHeaders } = headers;
+
+	    if (controller?.rawHeaders) {
+	      const rawHeaders = controller.rawHeaders;
+
+	      if (Array.isArray(rawHeaders)) {
+	        const filteredHeaders = [];
+	        for (let i = 0; i < rawHeaders.length; i += 2) {
+	          const headerName = rawHeaders[i];
+	          const name = Buffer.isBuffer(headerName) ? headerName.toString('latin1') : `${headerName}`;
+	          const lowerName = name.toLowerCase();
+
+	          if (lowerName === 'content-encoding' || lowerName === 'content-length') {
+	            continue
+	          }
+
+	          filteredHeaders.push(rawHeaders[i], rawHeaders[i + 1]);
+	        }
+	        controller.rawHeaders = filteredHeaders;
+	      } else if (typeof rawHeaders === 'object') {
+	        for (const name of Object.keys(rawHeaders)) {
+	          const lowerName = name.toLowerCase();
+	          if (lowerName === 'content-encoding' || lowerName === 'content-length') {
+	            delete rawHeaders[name];
+	          }
+	        }
+	      }
+	    }
 
 	    if (this.#decompressors.length === 1) {
 	      this.#setupSingleDecompressor(controller);
@@ -30278,7 +30405,7 @@ function requireFetch () {
 	        body: null,
 	        abort: null,
 
-	        onConnect (abort) {
+	        onRequestStart (controller) {
 	          // TODO (fix): Do we need connection here?
 	          const { connection } = fetchParams.controller;
 
@@ -30287,6 +30414,8 @@ function requireFetch () {
 	          // time, and fetchParams’s cross-origin isolated capability.
 	          // TODO: implement connection timing
 	          timingInfo.finalConnectionTimingInfo = clampAndCoarsenConnectionTimingInfo(undefined, timingInfo.postRedirectStartTime, fetchParams.crossOriginIsolatedCapability);
+
+	          const abort = (reason) => controller.abort(reason);
 
 	          if (connection.destroyed) {
 	            abort(new DOMException('The operation was aborted.', 'AbortError'));
@@ -30308,19 +30437,28 @@ function requireFetch () {
 	          timingInfo.finalNetworkResponseStartTime = coarsenedSharedCurrentTime(fetchParams.crossOriginIsolatedCapability);
 	        },
 
-	        onHeaders (status, rawHeaders, resume, statusText) {
+	        onResponseStart (controller, status, _headers, statusText) {
 	          if (status < 200) {
-	            return false
+	            return
 	          }
 
+	          const rawHeaders = controller?.rawHeaders ?? [];
 	          const headersList = new HeadersList();
 
 	          for (let i = 0; i < rawHeaders.length; i += 2) {
-	            headersList.append(bufferToLowerCasedHeaderName(rawHeaders[i]), rawHeaders[i + 1].toString('latin1'), true);
+	            const nameStr = bufferToLowerCasedHeaderName(rawHeaders[i]);
+	            const value = rawHeaders[i + 1];
+	            if (Array.isArray(value) && !Buffer.isBuffer(rawHeaders[i + 1])) {
+	              for (const val of value) {
+	                headersList.append(nameStr, val.toString('latin1'), true);
+	              }
+	            } else {
+	              headersList.append(nameStr, value.toString('latin1'), true);
+	            }
 	          }
 	          const location = headersList.get('location', true);
 
-	          this.body = new Readable({ read: resume });
+	          this.body = new Readable({ read: () => controller.resume() });
 
 	          const willFollow = location && request.redirect === 'follow' &&
 	            redirectStatusSet.has(status);
@@ -30340,7 +30478,7 @@ function requireFetch () {
 	            const maxContentEncodings = 5;
 	            if (codings.length > maxContentEncodings) {
 	              reject(new Error(`too many content-encodings in response: ${codings.length}, maximum allowed is ${maxContentEncodings}`));
-	              return true
+	              return
 	            }
 
 	            for (let i = codings.length - 1; i >= 0; --i) {
@@ -30377,7 +30515,7 @@ function requireFetch () {
 	            }
 	          }
 
-	          const onError = this.onError.bind(this);
+	          const onError = (err) => this.onResponseError(controller, err);
 
 	          resolve({
 	            status,
@@ -30386,16 +30524,14 @@ function requireFetch () {
 	            body: decoders.length
 	              ? pipeline(this.body, ...decoders, (err) => {
 	                if (err) {
-	                  this.onError(err);
+	                  this.onResponseError(controller, err);
 	                }
 	              }).on('error', onError)
 	              : this.body.on('error', onError)
 	          });
-
-	          return true
 	        },
 
-	        onData (chunk) {
+	        onResponseData (controller, chunk) {
 	          if (fetchParams.controller.dump) {
 	            return
 	          }
@@ -30415,20 +30551,22 @@ function requireFetch () {
 
 	          //  4. See pullAlgorithm...
 
-	          return this.body.push(bytes)
+	          if (this.body.push(bytes) === false) {
+	            controller.pause();
+	          }
 	        },
 
-	        onComplete () {
+	        onResponseEnd () {
 	          if (this.abort) {
 	            fetchParams.controller.off('terminated', this.abort);
 	          }
 
 	          fetchParams.controller.ended = true;
 
-	          this.body.push(null);
+	          this.body?.push(null);
 	        },
 
-	        onError (error) {
+	        onResponseError (_controller, error) {
 	          if (this.abort) {
 	            fetchParams.controller.off('terminated', this.abort);
 	          }
@@ -30440,52 +30578,26 @@ function requireFetch () {
 	          reject(error);
 	        },
 
-	        onRequestUpgrade (_controller, status, headers, socket) {
+	        onRequestUpgrade (controller, status, _headers, socket) {
 	          // We need to support 200 for websocket over h2 as per RFC-8441
 	          // Absence of session means H1
 	          if ((socket.session != null && status !== 200) || (socket.session == null && status !== 101)) {
 	            return false
 	          }
 
-	          const headersList = new HeadersList();
-
-	          for (const [name, value] of Object.entries(headers)) {
-	            if (value == null) {
-	              continue
-	            }
-
-	            const headerName = name.toLowerCase();
-
-	            if (Array.isArray(value)) {
-	              for (const entry of value) {
-	                headersList.append(headerName, String(entry), true);
-	              }
-	            } else {
-	              headersList.append(headerName, String(value), true);
-	            }
-	          }
-
-	          resolve({
-	            status,
-	            statusText: STATUS_CODES[status],
-	            headersList,
-	            socket
-	          });
-
-	          return true
-	        },
-
-	        onUpgrade (status, rawHeaders, socket) {
-	          // We need to support 200 for websocket over h2 as per RFC-8441
-	          // Absence of session means H1
-	          if ((socket.session != null && status !== 200) || (socket.session == null && status !== 101)) {
-	            return false
-	          }
-
+	          const rawHeaders = controller?.rawHeaders ?? [];
 	          const headersList = new HeadersList();
 
 	          for (let i = 0; i < rawHeaders.length; i += 2) {
-	            headersList.append(bufferToLowerCasedHeaderName(rawHeaders[i]), rawHeaders[i + 1].toString('latin1'), true);
+	            const nameStr = bufferToLowerCasedHeaderName(rawHeaders[i]);
+	            const value = rawHeaders[i + 1];
+	            if (Array.isArray(value) && !Buffer.isBuffer(rawHeaders[i + 1])) {
+	              for (const val of value) {
+	                headersList.append(nameStr, val.toString('latin1'), true);
+	              }
+	            } else {
+	              headersList.append(nameStr, value.toString('latin1'), true);
+	            }
 	          }
 
 	          resolve({
@@ -36792,6 +36904,7 @@ function requireUndici () {
 		const BalancedPool = requireBalancedPool();
 		const RoundRobinPool = requireRoundRobinPool();
 		const Agent = requireAgent();
+		const Dispatcher1Wrapper = requireDispatcher1Wrapper();
 		const ProxyAgent = requireProxyAgent();
 		const Socks5ProxyAgent = requireSocks5ProxyAgent();
 		const EnvHttpProxyAgent = requireEnvHttpProxyAgent();
@@ -36821,6 +36934,7 @@ function requireUndici () {
 		module.exports.BalancedPool = BalancedPool;
 		module.exports.RoundRobinPool = RoundRobinPool;
 		module.exports.Agent = Agent;
+		module.exports.Dispatcher1Wrapper = Dispatcher1Wrapper;
 		module.exports.ProxyAgent = ProxyAgent;
 		module.exports.Socks5ProxyAgent = Socks5ProxyAgent;
 		module.exports.EnvHttpProxyAgent = EnvHttpProxyAgent;
