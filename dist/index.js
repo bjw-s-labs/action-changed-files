@@ -19,16 +19,16 @@ import require$$0$5 from 'node:diagnostics_channel';
 import require$$3 from 'node:util';
 import require$$4 from 'node:tls';
 import require$$0$6 from 'node:buffer';
-import require$$3$1 from 'node:zlib';
+import require$$0$7 from 'node:zlib';
 import require$$5$1 from 'node:perf_hooks';
 import require$$8 from 'node:util/types';
+import require$$2$1 from 'node:worker_threads';
 import require$$2$2 from 'node:crypto';
 import require$$1$1 from 'node:sqlite';
-import require$$2$1 from 'node:worker_threads';
 import require$$1$2 from 'node:url';
 import require$$1$3 from 'node:async_hooks';
 import require$$1$4 from 'node:console';
-import require$$0$7 from 'node:fs/promises';
+import require$$0$8 from 'node:fs/promises';
 import * as path from 'node:path';
 import path__default from 'node:path';
 import require$$2$3 from 'node:timers';
@@ -1819,8 +1819,6 @@ function requireUtil$5 () {
 	const { headerNameLowerCasedRecord } = requireConstants$6();
 	const { tree } = requireTree();
 
-	const [nodeMajor, nodeMinor] = process.versions.node.split('.', 2).map(v => Number(v));
-
 	class BodyAsyncIterable {
 	  constructor (body) {
 	    this[kBody] = body;
@@ -2130,7 +2128,7 @@ function requireUtil$5 () {
 	 */
 	function hasSafeIterator (obj) {
 	  const prototype = Object.getPrototypeOf(obj);
-	  const ownIterator = Object.prototype.hasOwnProperty.call(obj, Symbol.iterator);
+	  const ownIterator = Object.hasOwn(obj, Symbol.iterator);
 	  return ownIterator || (prototype != null && prototype !== Object.prototype && typeof obj[Symbol.iterator] === 'function')
 	}
 
@@ -2796,8 +2794,6 @@ function requireUtil$5 () {
 	  normalizedMethodRecords,
 	  isValidPort,
 	  isHttpOrHttpsPrefixed,
-	  nodeMajor,
-	  nodeMinor,
 	  safeHTTPMethods: Object.freeze(['GET', 'HEAD', 'OPTIONS', 'TRACE']),
 	  wrapRequestBody,
 	  setupConnectTimeout,
@@ -3804,6 +3800,10 @@ function requireDispatcherBase () {
 	    try {
 	      if (!opts || typeof opts !== 'object') {
 	        throw new InvalidArgumentError('opts must be an object.')
+	      }
+
+	      if (opts.dispatcher) {
+	        throw new InvalidArgumentError('opts.dispatcher is not supported by instance methods. Pass opts.dispatcher to the top-level undici functions or call the dispatcher instance method directly.')
 	      }
 
 	      if (this[kDestroyed] || this[kOnDestroyed]) {
@@ -5664,139 +5664,6 @@ function requireDataUrl () {
 	return dataUrl;
 }
 
-var runtimeFeatures = {};
-
-var hasRequiredRuntimeFeatures;
-
-function requireRuntimeFeatures () {
-	if (hasRequiredRuntimeFeatures) return runtimeFeatures;
-	hasRequiredRuntimeFeatures = 1;
-
-	/** @typedef {`node:${string}`} NodeModuleName */
-
-	/** @type {Record<NodeModuleName, () => any>} */
-	const lazyLoaders = {
-	  __proto__: null,
-	  'node:crypto': () => require$$2$2,
-	  'node:sqlite': () => require$$1$1,
-	  'node:worker_threads': () => require$$2$1,
-	  'node:zlib': () => require$$3$1
-	};
-
-	/**
-	 * @param {NodeModuleName} moduleName
-	 * @returns {boolean}
-	 */
-	function detectRuntimeFeatureByNodeModule (moduleName) {
-	  try {
-	    lazyLoaders[moduleName]();
-	    return true
-	  } catch (err) {
-	    if (err.code !== 'ERR_UNKNOWN_BUILTIN_MODULE' && err.code !== 'ERR_NO_CRYPTO') {
-	      throw err
-	    }
-	    return false
-	  }
-	}
-
-	/**
-	 * @param {NodeModuleName} moduleName
-	 * @param {string} property
-	 * @returns {boolean}
-	 */
-	function detectRuntimeFeatureByExportedProperty (moduleName, property) {
-	  const module = lazyLoaders[moduleName]();
-	  return typeof module[property] !== 'undefined'
-	}
-
-	const runtimeFeaturesByExportedProperty = /** @type {const} */ (['markAsUncloneable', 'zstd']);
-
-	/** @type {Record<RuntimeFeatureByExportedProperty, [NodeModuleName, string]>} */
-	const exportedPropertyLookup = {
-	  markAsUncloneable: ['node:worker_threads', 'markAsUncloneable'],
-	  zstd: ['node:zlib', 'createZstdDecompress']
-	};
-
-	/** @typedef {typeof runtimeFeaturesByExportedProperty[number]} RuntimeFeatureByExportedProperty */
-
-	const runtimeFeaturesAsNodeModule = /** @type {const} */ (['crypto', 'sqlite']);
-	/** @typedef {typeof runtimeFeaturesAsNodeModule[number]} RuntimeFeatureByNodeModule */
-
-	const features = /** @type {const} */ ([
-	  ...runtimeFeaturesAsNodeModule,
-	  ...runtimeFeaturesByExportedProperty
-	]);
-
-	/** @typedef {typeof features[number]} Feature */
-
-	/**
-	 * @param {Feature} feature
-	 * @returns {boolean}
-	 */
-	function detectRuntimeFeature (feature) {
-	  if (runtimeFeaturesAsNodeModule.includes(/** @type {RuntimeFeatureByNodeModule} */ (feature))) {
-	    return detectRuntimeFeatureByNodeModule(`node:${feature}`)
-	  } else if (runtimeFeaturesByExportedProperty.includes(/** @type {RuntimeFeatureByExportedProperty} */ (feature))) {
-	    const [moduleName, property] = exportedPropertyLookup[feature];
-	    return detectRuntimeFeatureByExportedProperty(moduleName, property)
-	  }
-	  throw new TypeError(`unknown feature: ${feature}`)
-	}
-
-	/**
-	 * @class
-	 * @name RuntimeFeatures
-	 */
-	class RuntimeFeatures {
-	  /** @type {Map<Feature, boolean>} */
-	  #map = new Map()
-
-	  /**
-	   * Clears all cached feature detections.
-	   */
-	  clear () {
-	    this.#map.clear();
-	  }
-
-	  /**
-	   * @param {Feature} feature
-	   * @returns {boolean}
-	   */
-	  has (feature) {
-	    return (
-	      this.#map.get(feature) ?? this.#detectRuntimeFeature(feature)
-	    )
-	  }
-
-	  /**
-	   * @param {Feature} feature
-	   * @param {boolean} value
-	   */
-	  set (feature, value) {
-	    if (features.includes(feature) === false) {
-	      throw new TypeError(`unknown feature: ${feature}`)
-	    }
-	    this.#map.set(feature, value);
-	  }
-
-	  /**
-	   * @param {Feature} feature
-	   * @returns {boolean}
-	   */
-	  #detectRuntimeFeature (feature) {
-	    const result = detectRuntimeFeature(feature);
-	    this.#map.set(feature, result);
-	    return result
-	  }
-	}
-
-	const instance = new RuntimeFeatures();
-
-	runtimeFeatures.runtimeFeatures = instance;
-	runtimeFeatures.default = instance;
-	return runtimeFeatures;
-}
-
 var webidl_1;
 var hasRequiredWebidl;
 
@@ -5806,7 +5673,7 @@ function requireWebidl () {
 
 	const assert = require$$0$2;
 	const { types, inspect } = require$$3;
-	const { runtimeFeatures } = requireRuntimeFeatures();
+	const { markAsUncloneable } = require$$2$1;
 
 	const UNDEFINED = 1;
 	const BOOLEAN = 2;
@@ -5962,9 +5829,7 @@ function requireWebidl () {
 	  }
 	};
 
-	webidl.util.markAsUncloneable = runtimeFeatures.has('markAsUncloneable')
-	  ? require$$2$1.markAsUncloneable
-	  : () => {};
+	webidl.util.markAsUncloneable = markAsUncloneable;
 
 	// https://webidl.spec.whatwg.org/#abstract-opdef-converttoint
 	webidl.util.ConvertToInt = function (V, bitLength, signedness, flags) {
@@ -6819,7 +6684,7 @@ function requireUtil$4 () {
 	hasRequiredUtil$4 = 1;
 
 	const { Transform } = require$$0$3;
-	const zlib = require$$3$1;
+	const zlib = require$$0$7;
 	const { redirectStatusSet, referrerPolicyTokens, badPortsSet } = requireConstants$4();
 	const { getGlobalOrigin } = requireGlobal$1();
 	const { collectAnHTTPQuotedString, parseMIMEType } = requireDataUrl();
@@ -8264,8 +8129,10 @@ function requireUtil$4 () {
 	 * @param {object|string} navigable
 	 */
 	function isTraversableNavigable (navigable) {
-	  // TODO
-	  return true
+	  // Returns true only if we have an actual traversable navigable object
+	  // that can prompt the user for credentials. In Node.js, this will always
+	  // be false since there's no Window object or navigable.
+	  return navigable != null && navigable !== 'client' && navigable !== 'no-traversable'
 	}
 
 	class EnvironmentSettingsObjectBase {
@@ -9186,40 +9053,106 @@ function requireFormdataParser () {
 	return formdataParser;
 }
 
-var promise;
-var hasRequiredPromise;
+var runtimeFeatures = {};
 
-function requirePromise () {
-	if (hasRequiredPromise) return promise;
-	hasRequiredPromise = 1;
+var hasRequiredRuntimeFeatures;
+
+function requireRuntimeFeatures () {
+	if (hasRequiredRuntimeFeatures) return runtimeFeatures;
+	hasRequiredRuntimeFeatures = 1;
+
+	/** @typedef {`node:${string}`} NodeModuleName */
+
+	/** @type {Record<NodeModuleName, () => any>} */
+	const lazyLoaders = {
+	  __proto__: null,
+	  'node:crypto': () => require$$2$2,
+	  'node:sqlite': () => require$$1$1
+	};
 
 	/**
-	 * @template {*} T
-	 * @typedef {Object} DeferredPromise
-	 * @property {Promise<T>} promise
-	 * @property {(value?: T) => void} resolve
-	 * @property {(reason?: any) => void} reject
+	 * @param {NodeModuleName} moduleName
+	 * @returns {boolean}
 	 */
-
-	/**
-	 * @template {*} T
-	 * @returns {DeferredPromise<T>} An object containing a promise and its resolve/reject methods.
-	 */
-	function createDeferredPromise () {
-	  let res;
-	  let rej;
-	  const promise = new Promise((resolve, reject) => {
-	    res = resolve;
-	    rej = reject;
-	  });
-
-	  return { promise, resolve: res, reject: rej }
+	function detectRuntimeFeatureByNodeModule (moduleName) {
+	  try {
+	    lazyLoaders[moduleName]();
+	    return true
+	  } catch (err) {
+	    if (err.code !== 'ERR_UNKNOWN_BUILTIN_MODULE' && err.code !== 'ERR_NO_CRYPTO') {
+	      throw err
+	    }
+	    return false
+	  }
 	}
 
-	promise = {
-	  createDeferredPromise
-	};
-	return promise;
+	const runtimeFeaturesAsNodeModule = /** @type {const} */ (['crypto', 'sqlite']);
+	/** @typedef {typeof runtimeFeaturesAsNodeModule[number]} RuntimeFeatureByNodeModule */
+	/** @typedef {RuntimeFeatureByNodeModule} Feature */
+
+	/**
+	 * @param {Feature} feature
+	 * @returns {boolean}
+	 */
+	function detectRuntimeFeature (feature) {
+	  if (runtimeFeaturesAsNodeModule.includes(/** @type {RuntimeFeatureByNodeModule} */ (feature))) {
+	    return detectRuntimeFeatureByNodeModule(`node:${feature}`)
+	  }
+	  throw new TypeError(`unknown feature: ${feature}`)
+	}
+
+	/**
+	 * @class
+	 * @name RuntimeFeatures
+	 */
+	class RuntimeFeatures {
+	  /** @type {Map<Feature, boolean>} */
+	  #map = new Map()
+
+	  /**
+	   * Clears all cached feature detections.
+	   */
+	  clear () {
+	    this.#map.clear();
+	  }
+
+	  /**
+	   * @param {Feature} feature
+	   * @returns {boolean}
+	   */
+	  has (feature) {
+	    return (
+	      this.#map.get(feature) ?? this.#detectRuntimeFeature(feature)
+	    )
+	  }
+
+	  /**
+	   * @param {Feature} feature
+	   * @param {boolean} value
+	   */
+	  set (feature, value) {
+	    if (runtimeFeaturesAsNodeModule.includes(feature) === false) {
+	      throw new TypeError(`unknown feature: ${feature}`)
+	    }
+	    this.#map.set(feature, value);
+	  }
+
+	  /**
+	   * @param {Feature} feature
+	   * @returns {boolean}
+	   */
+	  #detectRuntimeFeature (feature) {
+	    const result = detectRuntimeFeature(feature);
+	    this.#map.set(feature, result);
+	    return result
+	  }
+	}
+
+	const instance = new RuntimeFeatures();
+
+	runtimeFeatures.runtimeFeatures = instance;
+	runtimeFeatures.default = instance;
+	return runtimeFeatures;
 }
 
 var body;
@@ -9243,7 +9176,6 @@ function requireBody () {
 	const { isUint8Array } = require$$8;
 	const { serializeAMimeType } = requireDataUrl();
 	const { multipartFormDataParser } = requireFormdataParser();
-	const { createDeferredPromise } = requirePromise();
 	const { parseJSONFromBytes } = requireInfra();
 	const { utf8DecodeBytes } = requireEncoding();
 	const { runtimeFeatures } = requireRuntimeFeatures();
@@ -9660,7 +9592,7 @@ function requireBody () {
 	  }
 
 	  // 2. Let promise be a new promise.
-	  const promise = createDeferredPromise();
+	  const promise = Promise.withResolvers();
 
 	  // 3. Let errorSteps given error be to reject promise with error.
 	  const errorSteps = promise.reject;
@@ -13468,9 +13400,6 @@ function requirePool () {
 	    this[kConnections] = connections || null;
 	    this[kUrl] = util.parseOrigin(origin);
 	    this[kOptions] = { ...util.deepClone(options), connect, allowH2, clientTtl, socketPath };
-	    this[kOptions].interceptors = options.interceptors
-	      ? { ...options.interceptors }
-	      : undefined;
 	    this[kFactory] = factory;
 
 	    this.on('connect', (origin, targets) => {
@@ -13583,9 +13512,6 @@ function requireBalancedPool () {
 	    super();
 
 	    this[kOptions] = { ...util.deepClone(opts) };
-	    this[kOptions].interceptors = opts.interceptors
-	      ? { ...opts.interceptors }
-	      : undefined;
 	    this[kIndex] = -1;
 	    this[kCurrentWeight] = 0;
 
@@ -13822,9 +13748,6 @@ function requireRoundRobinPool () {
 	    this[kConnections] = connections || null;
 	    this[kUrl] = util.parseOrigin(origin);
 	    this[kOptions] = { ...util.deepClone(options), connect, allowH2, clientTtl, socketPath };
-	    this[kOptions].interceptors = options.interceptors
-	      ? { ...options.interceptors }
-	      : undefined;
 	    this[kFactory] = factory;
 	    this[kIndex] = -1;
 
@@ -14166,6 +14089,12 @@ function requireDispatcher1Wrapper () {
 	  }
 
 	  dispatch (opts, handler) {
+	    // Legacy (v1) consumers do not support HTTP/2, so force HTTP/1.1.
+	    // See https://github.com/nodejs/undici/issues/4989
+	    if (opts.allowH2 !== false) {
+	      opts = { ...opts, allowH2: false };
+	    }
+
 	    return this.#dispatcher.dispatch(opts, Dispatcher1Wrapper.wrapHandler(handler))
 	  }
 
@@ -14894,25 +14823,27 @@ function requireSocks5ProxyAgent () {
 	    debug('creating SOCKS5 connection to', proxyHost, proxyPort);
 
 	    // Connect to the SOCKS5 proxy
-	    const socket = await new Promise((resolve, reject) => {
-	      const onConnect = () => {
-	        socket.removeListener('error', onError);
-	        resolve(socket);
-	      };
+	    const socketReady = Promise.withResolvers();
 
-	      const onError = (err) => {
-	        socket.removeListener('connect', onConnect);
-	        reject(err);
-	      };
+	    const onSocketConnect = () => {
+	      socket.removeListener('error', onSocketError);
+	      socketReady.resolve(socket);
+	    };
 
-	      const socket = net.connect({
-	        host: proxyHost,
-	        port: proxyPort
-	      });
+	    const onSocketError = (err) => {
+	      socket.removeListener('connect', onSocketConnect);
+	      socketReady.reject(err);
+	    };
 
-	      socket.once('connect', onConnect);
-	      socket.once('error', onError);
+	    const socket = net.connect({
+	      host: proxyHost,
+	      port: proxyPort
 	    });
+
+	    socket.once('connect', onSocketConnect);
+	    socket.once('error', onSocketError);
+
+	    await socketReady.promise;
 
 	    // Create SOCKS5 client
 	    const socks5Client = new Socks5Client(socket, this[kProxyAuth]);
@@ -14927,58 +14858,62 @@ function requireSocks5ProxyAgent () {
 	    await socks5Client.handshake();
 
 	    // Wait for authentication (if required)
-	    await new Promise((resolve, reject) => {
-	      const timeout = setTimeout(() => {
-	        reject(new Error('SOCKS5 authentication timeout'));
-	      }, 5000);
+	    const authenticationReady = Promise.withResolvers();
 
-	      const onAuthenticated = () => {
-	        clearTimeout(timeout);
-	        socks5Client.removeListener('error', onError);
-	        resolve();
-	      };
+	    const authenticationTimeout = setTimeout(() => {
+	      authenticationReady.reject(new Error('SOCKS5 authentication timeout'));
+	    }, 5000);
 
-	      const onError = (err) => {
-	        clearTimeout(timeout);
-	        socks5Client.removeListener('authenticated', onAuthenticated);
-	        reject(err);
-	      };
+	    const onAuthenticated = () => {
+	      clearTimeout(authenticationTimeout);
+	      socks5Client.removeListener('error', onAuthenticationError);
+	      authenticationReady.resolve();
+	    };
 
-	      // Check if already authenticated (for NO_AUTH method)
-	      if (socks5Client.state === 'authenticated') {
-	        clearTimeout(timeout);
-	        resolve();
-	      } else {
-	        socks5Client.once('authenticated', onAuthenticated);
-	        socks5Client.once('error', onError);
-	      }
-	    });
+	    const onAuthenticationError = (err) => {
+	      clearTimeout(authenticationTimeout);
+	      socks5Client.removeListener('authenticated', onAuthenticated);
+	      authenticationReady.reject(err);
+	    };
+
+	    // Check if already authenticated (for NO_AUTH method)
+	    if (socks5Client.state === 'authenticated') {
+	      clearTimeout(authenticationTimeout);
+	      authenticationReady.resolve();
+	    } else {
+	      socks5Client.once('authenticated', onAuthenticated);
+	      socks5Client.once('error', onAuthenticationError);
+	    }
+
+	    await authenticationReady.promise;
 
 	    // Send CONNECT command
 	    await socks5Client.connect(targetHost, targetPort);
 
 	    // Wait for connection
-	    await new Promise((resolve, reject) => {
-	      const timeout = setTimeout(() => {
-	        reject(new Error('SOCKS5 connection timeout'));
-	      }, 5000);
+	    const connectionReady = Promise.withResolvers();
 
-	      const onConnected = (info) => {
-	        debug('SOCKS5 tunnel established to', targetHost, targetPort, 'via', info);
-	        clearTimeout(timeout);
-	        socks5Client.removeListener('error', onError);
-	        resolve();
-	      };
+	    const connectionTimeout = setTimeout(() => {
+	      connectionReady.reject(new Error('SOCKS5 connection timeout'));
+	    }, 5000);
 
-	      const onError = (err) => {
-	        clearTimeout(timeout);
-	        socks5Client.removeListener('connected', onConnected);
-	        reject(err);
-	      };
+	    const onConnected = (info) => {
+	      debug('SOCKS5 tunnel established to', targetHost, targetPort, 'via', info);
+	      clearTimeout(connectionTimeout);
+	      socks5Client.removeListener('error', onConnectionError);
+	      connectionReady.resolve();
+	    };
 
-	      socks5Client.once('connected', onConnected);
-	      socks5Client.once('error', onError);
-	    });
+	    const onConnectionError = (err) => {
+	      clearTimeout(connectionTimeout);
+	      socks5Client.removeListener('connected', onConnected);
+	      connectionReady.reject(err);
+	    };
+
+	    socks5Client.once('connected', onConnected);
+	    socks5Client.once('error', onConnectionError);
+
+	    await connectionReady.promise;
 
 	    return socket
 	  }
@@ -15021,10 +14956,10 @@ function requireSocks5ProxyAgent () {
 	                  ...connectOpts.tls || {}
 	                });
 
-	                await new Promise((resolve, reject) => {
-	                  finalSocket.once('secureConnect', resolve);
-	                  finalSocket.once('error', reject);
-	                });
+	                const tlsReady = Promise.withResolvers();
+	                finalSocket.once('secureConnect', tlsReady.resolve);
+	                finalSocket.once('error', tlsReady.reject);
+	                await tlsReady.promise;
 	              }
 
 	              callback(null, finalSocket);
@@ -15176,7 +15111,7 @@ function requireProxyAgent () {
 	      throw new InvalidArgumentError('Proxy opts.clientFactory must be a function.')
 	    }
 
-	    const { proxyTunnel = true } = opts;
+	    const { proxyTunnel = true, connectTimeout } = opts;
 
 	    super();
 
@@ -15200,9 +15135,9 @@ function requireProxyAgent () {
 	      this[kProxyHeaders]['proxy-authorization'] = `Basic ${Buffer.from(`${decodeURIComponent(username)}:${decodeURIComponent(password)}`).toString('base64')}`;
 	    }
 
-	    const connect = buildConnector({ ...opts.proxyTls });
-	    this[kConnectEndpoint] = buildConnector({ ...opts.requestTls });
-	    this[kConnectEndpointHTTP1] = buildConnector({ ...opts.requestTls, allowH2: false });
+	    const connect = buildConnector({ timeout: connectTimeout, ...opts.proxyTls });
+	    this[kConnectEndpoint] = buildConnector({ timeout: connectTimeout, ...opts.requestTls });
+	    this[kConnectEndpointHTTP1] = buildConnector({ timeout: connectTimeout, ...opts.requestTls, allowH2: false });
 
 	    const agentFactory = opts.factory || defaultAgentFactory;
 	    const factory = (origin, options) => {
@@ -16017,7 +15952,7 @@ function requireH2cClient () {
 	      )
 	    }
 
-	    const { connect, maxConcurrentStreams, pipelining, ...opts } =
+	    const { maxConcurrentStreams, pipelining, ...opts } =
 	            clientOpts ?? {};
 	    let defaultMaxConcurrentStreams = 100;
 	    let defaultPipelining = 100;
@@ -19391,7 +19326,7 @@ function requireSnapshotRecorder () {
 	if (hasRequiredSnapshotRecorder) return snapshotRecorder;
 	hasRequiredSnapshotRecorder = 1;
 
-	const { writeFile, readFile, mkdir } = require$$0$7;
+	const { writeFile, readFile, mkdir } = require$$0$8;
 	const { dirname, resolve } = path__default;
 	const { setTimeout, clearTimeout } = require$$2$3;
 	const { InvalidArgumentError, UndiciError } = requireErrors();
@@ -20501,29 +20436,12 @@ function requireRedirectHandler () {
 	hasRequiredRedirectHandler = 1;
 
 	const util = requireUtil$5();
-	const { kBodyUsed } = requireSymbols();
 	const assert = require$$0$2;
 	const { InvalidArgumentError } = requireErrors();
-	const EE = require$$0$1;
 
 	const redirectableStatusCodes = [300, 301, 302, 303, 307, 308];
 
-	const kBody = Symbol('body');
-
 	const noop = () => {};
-
-	class BodyAsyncIterable {
-	  constructor (body) {
-	    this[kBody] = body;
-	    this[kBodyUsed] = false;
-	  }
-
-	  async * [Symbol.asyncIterator] () {
-	    assert(!this[kBodyUsed], 'disturbed');
-	    this[kBodyUsed] = true;
-	    yield * this[kBody];
-	  }
-	}
 
 	class RedirectHandler {
 	  static buildDispatch (dispatcher, maxRedirections) {
@@ -20544,43 +20462,10 @@ function requireRedirectHandler () {
 	    this.location = null;
 	    const { maxRedirections: _, ...cleanOpts } = opts;
 	    this.opts = cleanOpts; // opts must be a copy, exclude maxRedirections
+	    this.opts.body = util.wrapRequestBody(this.opts.body);
 	    this.maxRedirections = maxRedirections;
 	    this.handler = handler;
 	    this.history = [];
-
-	    if (util.isStream(this.opts.body)) {
-	      // TODO (fix): Provide some way for the user to cache the file to e.g. /tmp
-	      // so that it can be dispatched again?
-	      // TODO (fix): Do we need 100-expect support to provide a way to do this properly?
-	      if (util.bodyLength(this.opts.body) === 0) {
-	        this.opts.body
-	          .on('data', function () {
-	            assert(false);
-	          });
-	      }
-
-	      if (typeof this.opts.body.readableDidRead !== 'boolean') {
-	        this.opts.body[kBodyUsed] = false;
-	        EE.prototype.on.call(this.opts.body, 'data', function () {
-	          this[kBodyUsed] = true;
-	        });
-	      }
-	    } else if (this.opts.body && typeof this.opts.body.pipeTo === 'function') {
-	      // TODO (fix): We can't access ReadableStream internal state
-	      // to determine whether or not it has been disturbed. This is just
-	      // a workaround.
-	      this.opts.body = new BodyAsyncIterable(this.opts.body);
-	    } else if (
-	      this.opts.body &&
-	      typeof this.opts.body !== 'string' &&
-	      !ArrayBuffer.isView(this.opts.body) &&
-	      util.isIterable(this.opts.body) &&
-	      !util.isFormDataLike(this.opts.body)
-	    ) {
-	      // TODO: Should we allow re-using iterable if !this.opts.idempotent
-	      // or through some other flag?
-	      this.opts.body = new BodyAsyncIterable(this.opts.body);
-	    }
 	  }
 
 	  onRequestStart (controller, context) {
@@ -21014,7 +20899,7 @@ function requireDns () {
 
 	function hasSafeIterator (headers) {
 	  const prototype = Object.getPrototypeOf(headers);
-	  const ownIterator = Object.prototype.hasOwnProperty.call(headers, Symbol.iterator);
+	  const ownIterator = Object.hasOwn(headers, Symbol.iterator);
 	  return ownIterator || (prototype != null && prototype !== Object.prototype && typeof headers[Symbol.iterator] === 'function')
 	}
 
@@ -21960,9 +21845,11 @@ function requireCache$2 () {
 	 * @returns {string}
 	 */
 	function makeDeduplicationKey (cacheKey, excludeHeaders) {
-	  // Create a deterministic string key from the cache key
-	  // Include origin, method, path, and sorted headers
-	  let key = `${cacheKey.origin}:${cacheKey.method}:${cacheKey.path}`;
+	  // Use JSON.stringify to produce a collision-resistant key.
+	  // Previous format used `:` and `=` delimiters without escaping, which
+	  // allowed different header sets to produce identical keys (e.g.
+	  // {a:"x:b=y"} vs {a:"x", b:"y"}). See: https://github.com/nodejs/undici/issues/5012
+	  const headers = {};
 
 	  if (cacheKey.headers) {
 	    const sortedHeaders = Object.keys(cacheKey.headers).sort();
@@ -21971,12 +21858,11 @@ function requireCache$2 () {
 	      if (excludeHeaders?.has(header.toLowerCase())) {
 	        continue
 	      }
-	      const value = cacheKey.headers[header];
-	      key += `:${header}=${Array.isArray(value) ? value.join(',') : value}`;
+	      headers[header] = cacheKey.headers[header];
 	    }
 	  }
 
-	  return key
+	  return JSON.stringify([cacheKey.origin, cacheKey.method, cacheKey.path, headers])
 	}
 
 	cache$2 = {
@@ -24146,10 +24032,9 @@ function requireDecompress () {
 	if (hasRequiredDecompress) return decompress;
 	hasRequiredDecompress = 1;
 
-	const { createInflate, createGunzip, createBrotliDecompress, createZstdDecompress } = require$$3$1;
+	const { createInflate, createGunzip, createBrotliDecompress, createZstdDecompress } = require$$0$7;
 	const { pipeline } = require$$0$3;
 	const DecoratorHandler = requireDecoratorHandler();
-	const { runtimeFeatures } = requireRuntimeFeatures();
 
 	/** @typedef {import('node:stream').Transform} Transform */
 	/** @typedef {import('node:stream').Transform} Controller */
@@ -24163,7 +24048,7 @@ function requireDecompress () {
 	  deflate: createInflate,
 	  compress: createInflate,
 	  'x-compress': createInflate,
-	  ...(runtimeFeatures.has('zstd') ? { zstd: createZstdDecompress } : {})
+	  zstd: createZstdDecompress
 	};
 
 	const defaultSkipStatusCodes = /** @type {const} */ ([204, 304]);
@@ -28324,7 +28209,7 @@ function requireFetch () {
 	} = requireResponse();
 	const { HeadersList } = requireHeaders();
 	const { Request, cloneRequest, getRequestDispatcher, getRequestState } = requireRequest();
-	const zlib = require$$3$1;
+	const zlib = require$$0$7;
 	const {
 	  makePolicyContainer,
 	  clonePolicyContainer,
@@ -28376,12 +28261,7 @@ function requireFetch () {
 	const { webidl } = requireWebidl();
 	const { STATUS_CODES } = require$$2;
 	const { bytesMatch } = requireSubresourceIntegrity();
-	const { createDeferredPromise } = requirePromise();
 	const { isomorphicEncode } = requireInfra();
-	const { runtimeFeatures } = requireRuntimeFeatures();
-
-	// Node.js v23.8.0+ and v22.15.0+ supports Zstandard
-	const hasZstd = runtimeFeatures.has('zstd');
 
 	const GET_OR_HEAD = ['GET', 'HEAD'];
 
@@ -28448,7 +28328,7 @@ function requireFetch () {
 	  webidl.argumentLengthCheck(arguments, 1, 'globalThis.fetch');
 
 	  // 1. Let p be a new promise.
-	  let p = createDeferredPromise();
+	  let p = Promise.withResolvers();
 
 	  // 2. Let requestObject be the result of invoking the initial value of
 	  // Request as constructor with input and init as arguments. If this throws
@@ -29927,12 +29807,25 @@ function requireFetch () {
 	  // 14. If response’s status is 401, httpRequest’s response tainting is not "cors",
 	  //     includeCredentials is true, and request’s traversable for user prompts is
 	  //     a traversable navigable:
-	  if (response.status === 401 && httpRequest.responseTainting !== 'cors' && includeCredentials && isTraversableNavigable(request.traversableForUserPrompts)) {
+	  //
+	  //     In Node.js there is no traversable navigable to prompt the user, but we
+	  //     still need to handle URL-embedded credentials so authentication retries
+	  //     for WebSocket handshakes continue to work.
+	  if (response.status === 401 && httpRequest.responseTainting !== 'cors' && includeCredentials && (
+	    request.useURLCredentials !== undefined ||
+	    isTraversableNavigable(request.traversableForUserPrompts)
+	  )) {
 	    // 2. If request’s body is non-null, then:
 	    if (request.body != null) {
 	      // 1. If request’s body’s source is null, then return a network error.
 	      if (request.body.source == null) {
-	        return makeNetworkError('expected non-null body source')
+	        // Note: In Node.js, this code path should not be reached because
+	        // isTraversableNavigable() returns false for non-navigable contexts.
+	        // However, we handle it gracefully by returning the response instead of
+	        // a network error, as we won't actually retry the request.
+	        // This aligns with the Fetch spec discussion in whatwg/fetch#1132,
+	        // which allows implementations flexibility when credentials can't be obtained.
+	        return response
 	      }
 
 	      // 2. Set request’s body to the body of the result of safely extracting
@@ -30507,7 +30400,7 @@ function requireFetch () {
 	                    flush: zlib.constants.BROTLI_OPERATION_FLUSH,
 	                    finishFlush: zlib.constants.BROTLI_OPERATION_FLUSH
 	                  }));
-	                } else if (coding === 'zstd' && hasZstd) {
+	                } else if (coding === 'zstd') {
 	                  decoders.push(zlib.createZstdDecompress({
 	                    flush: zlib.constants.ZSTD_e_continue,
 	                    finishFlush: zlib.constants.ZSTD_e_end
@@ -30710,8 +30603,6 @@ function requireCache () {
 	const { Request, fromInnerRequest, getRequestState } = requireRequest();
 	const { fetching } = requireFetch();
 	const { urlIsHttpHttpsScheme, readAllBytes } = requireUtil$4();
-	const { createDeferredPromise } = requirePromise();
-
 	/**
 	 * @see https://w3c.github.io/ServiceWorker/#dfn-cache-batch-operation
 	 * @typedef {Object} CacheBatchOperation
@@ -30853,7 +30744,7 @@ function requireCache () {
 	      requestList.push(r);
 
 	      // 5.6
-	      const responsePromise = createDeferredPromise();
+	      const responsePromise = Promise.withResolvers();
 
 	      // 5.7
 	      fetchControllers.push(fetching({
@@ -30931,7 +30822,7 @@ function requireCache () {
 	    }
 
 	    // 7.5
-	    const cacheJobPromise = createDeferredPromise();
+	    const cacheJobPromise = Promise.withResolvers();
 
 	    // 7.6.1
 	    let errorData = null;
@@ -31025,7 +30916,7 @@ function requireCache () {
 	    const clonedResponse = cloneResponse(innerResponse);
 
 	    // 10.
-	    const bodyReadPromise = createDeferredPromise();
+	    const bodyReadPromise = Promise.withResolvers();
 
 	    // 11.
 	    if (innerResponse.body != null) {
@@ -31064,7 +30955,7 @@ function requireCache () {
 	    }
 
 	    // 19.1
-	    const cacheJobPromise = createDeferredPromise();
+	    const cacheJobPromise = Promise.withResolvers();
 
 	    // 19.2.1
 	    let errorData = null;
@@ -31127,7 +31018,7 @@ function requireCache () {
 
 	    operations.push(operation);
 
-	    const cacheJobPromise = createDeferredPromise();
+	    const cacheJobPromise = Promise.withResolvers();
 
 	    let errorData = null;
 	    let requestResponses;
@@ -31183,7 +31074,7 @@ function requireCache () {
 	    }
 
 	    // 4.
-	    const promise = createDeferredPromise();
+	    const promise = Promise.withResolvers();
 
 	    // 5.
 	    // 5.1
@@ -33883,7 +33774,7 @@ function requirePermessageDeflate () {
 	if (hasRequiredPermessageDeflate) return permessageDeflate;
 	hasRequiredPermessageDeflate = 1;
 
-	const { createInflateRaw, Z_DEFAULT_WINDOWBITS } = require$$3$1;
+	const { createInflateRaw, Z_DEFAULT_WINDOWBITS } = require$$0$7;
 	const { isValidClientWindowBits } = requireUtil$1();
 	const { MessageSizeExceededError } = requireErrors();
 
@@ -35455,7 +35346,6 @@ function requireWebsocketstream () {
 	if (hasRequiredWebsocketstream) return websocketstream;
 	hasRequiredWebsocketstream = 1;
 
-	const { createDeferredPromise } = requirePromise();
 	const { environmentSettingsObject } = requireUtil$4();
 	const { states, opcodes, sentCloseFrameState } = requireConstants$2();
 	const { webidl } = requireWebidl();
@@ -35476,11 +35366,11 @@ function requireWebsocketstream () {
 	  #url
 
 	  // Each WebSocketStream object has an associated opened promise , which is a promise.
-	  /** @type {import('../../../util/promise').DeferredPromise} */
+	  /** @type {ReturnType<typeof Promise.withResolvers>} */
 	  #openedPromise
 
 	  // Each WebSocketStream object has an associated closed promise , which is a promise.
-	  /** @type {import('../../../util/promise').DeferredPromise} */
+	  /** @type {ReturnType<typeof Promise.withResolvers>} */
 	  #closedPromise
 
 	  // Each WebSocketStream object has an associated readable stream , which is a ReadableStream .
@@ -35568,8 +35458,8 @@ function requireWebsocketstream () {
 	    this.#url = urlRecord.toString();
 
 	    // 6. Set this 's opened promise and closed promise to new promises.
-	    this.#openedPromise = createDeferredPromise();
-	    this.#closedPromise = createDeferredPromise();
+	    this.#openedPromise = Promise.withResolvers();
+	    this.#closedPromise = Promise.withResolvers();
 
 	    // 7. Apply backpressure to the WebSocket.
 	    // TODO
@@ -35657,7 +35547,7 @@ function requireWebsocketstream () {
 	    chunk = webidl.converters.WebSocketStreamWrite(chunk);
 
 	    // 1. Let promise be a new promise created in stream ’s relevant realm .
-	    const promise = createDeferredPromise();
+	    const promise = Promise.withResolvers();
 
 	    // 2. Let data be null.
 	    let data = null;
@@ -37014,14 +36904,14 @@ function requireUndici () {
 		      url = util.parseURL(url);
 		    }
 
-		    const { agent, dispatcher = getGlobalDispatcher() } = opts;
+		    const { agent, dispatcher = getGlobalDispatcher(), ...restOpts } = opts;
 
 		    if (agent) {
 		      throw new InvalidArgumentError('unsupported opts.agent. Did you mean opts.client?')
 		    }
 
 		    return fn.call(dispatcher, {
-		      ...opts,
+		      ...restOpts,
 		      origin: url.origin,
 		      path: url.search ? `${url.pathname}${url.search}` : url.pathname,
 		      method: opts.method || (opts.body ? 'PUT' : 'GET')
