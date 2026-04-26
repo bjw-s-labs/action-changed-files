@@ -40,7 +40,7 @@
   "license": "MIT",
   "dependencies": {
     "@actions/core": "3.0.1",
-    "@actions/github": "9.1.0",
+    "@actions/github": "9.1.1",
     "@types/micromatch": "4.0.10",
     "micromatch": "4.0.8"
   },
