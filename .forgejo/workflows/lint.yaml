@@ -3,7 +3,6 @@
 name: Lint
 
 on:
-  workflow_dispatch:
   pull_request:
     branches:
       - main
@@ -11,6 +10,9 @@ on:
       - opened
       - reopened
       - synchronize
+  push:
+    branches:
+      - main
 
 concurrency:
   group: ${{ forgejo.ref }}-${{ forgejo.workflow }}
