@@ -1,2 +1,4 @@
 ---
 ignoreScripts: true
+minimumReleaseAgeExclude:
+  - prettier@3.9.1

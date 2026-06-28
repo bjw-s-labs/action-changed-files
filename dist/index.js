@@ -2728,6 +2728,7 @@ function requireDispatcherBase () {
 
 	  get webSocketOptions () {
 	    return {
+	      maxFragments: this[kWebSocketOptions].maxFragments ?? 131072,
 	      maxPayloadSize: this[kWebSocketOptions].maxPayloadSize ?? 128 * 1024 * 1024
 	    }
 	  }
@@ -8679,6 +8680,9 @@ function requireClientH1 () {
 	const FastBuffer = Buffer[Symbol.species];
 	const addListener = util.addListener;
 	const removeAllListeners = util.removeAllListeners;
+	const kIdleSocketValidation = Symbol('kIdleSocketValidation');
+	const kIdleSocketValidationTimeout = Symbol('kIdleSocketValidationTimeout');
+	const kSocketUsed = Symbol('kSocketUsed');
 
 	let extractBody;
 
@@ -8901,27 +8905,69 @@ function requireClientH1 () {
 
 	      const offset = llhttp.llhttp_get_error_pos(this.ptr) - currentBufferPtr;
 
-	      if (ret === constants.ERROR.PAUSED_UPGRADE) {
-	        this.onUpgrade(data.slice(offset));
-	      } else if (ret === constants.ERROR.PAUSED) {
-	        this.paused = true;
-	        socket.unshift(data.slice(offset));
-	      } else if (ret !== constants.ERROR.OK) {
-	        const ptr = llhttp.llhttp_get_error_reason(this.ptr);
-	        let message = '';
-	        /* istanbul ignore else: difficult to make a test case for */
-	        if (ptr) {
-	          const len = new Uint8Array(llhttp.memory.buffer, ptr).indexOf(0);
-	          message =
-	            'Response does not match the HTTP/1.1 protocol (' +
-	            Buffer.from(llhttp.memory.buffer, ptr, len).toString() +
-	            ')';
+	      if (ret !== constants.ERROR.OK) {
+	        const body = data.subarray(offset);
+
+	        if (ret === constants.ERROR.PAUSED_UPGRADE) {
+	          this.onUpgrade(body);
+	        } else if (ret === constants.ERROR.PAUSED) {
+	          this.paused = true;
+	          socket.unshift(body);
+	        } else {
+	          throw this.createError(ret, body)
 	        }
-	        throw new HTTPParserError(message, constants.ERROR[ret], data.slice(offset))
 	      }
 	    } catch (err) {
 	      util.destroy(socket, err);
 	    }
+	  }
+
+	  finish () {
+	    assert(currentParser === null);
+	    assert(this.ptr != null);
+	    assert(!this.paused);
+
+	    const { llhttp } = this;
+
+	    let ret;
+
+	    try {
+	      currentParser = this;
+	      ret = llhttp.llhttp_finish(this.ptr);
+	    } finally {
+	      currentParser = null;
+	    }
+
+	    if (ret === constants.ERROR.OK) {
+	      return null
+	    }
+
+	    if (ret === constants.ERROR.PAUSED || ret === constants.ERROR.PAUSED_UPGRADE) {
+	      this.paused = true;
+	      return null
+	    }
+
+	    return this.createError(ret, EMPTY_BUF)
+	  }
+
+	  createError (ret, data) {
+	    const { llhttp, contentLength, bytesRead } = this;
+
+	    if (contentLength && bytesRead !== parseInt(contentLength, 10)) {
+	      return new ResponseContentLengthMismatchError()
+	    }
+
+	    const ptr = llhttp.llhttp_get_error_reason(this.ptr);
+	    let message = '';
+	    if (ptr) {
+	      const len = new Uint8Array(llhttp.memory.buffer, ptr).indexOf(0);
+	      message =
+	        'Response does not match the HTTP/1.1 protocol (' +
+	        Buffer.from(llhttp.memory.buffer, ptr, len).toString() +
+	        ')';
+	    }
+
+	    return new HTTPParserError(message, constants.ERROR[ret], data)
 	  }
 
 	  destroy () {
@@ -8948,6 +8994,11 @@ function requireClientH1 () {
 
 	    /* istanbul ignore next: difficult to make a test case for */
 	    if (socket.destroyed) {
+	      return -1
+	    }
+
+	    if (client[kRunning] === 0) {
+	      util.destroy(socket, new SocketError('bad response', util.getSocketInfo(socket)));
 	      return -1
 	    }
 
@@ -9051,6 +9102,11 @@ function requireClientH1 () {
 
 	    /* istanbul ignore next: difficult to make a test case for */
 	    if (socket.destroyed) {
+	      return -1
+	    }
+
+	    if (client[kRunning] === 0) {
+	      util.destroy(socket, new SocketError('bad response', util.getSocketInfo(socket)));
 	      return -1
 	    }
 
@@ -9227,6 +9283,7 @@ function requireClientH1 () {
 	    request.onComplete(headers);
 
 	    client[kQueue][client[kRunningIdx]++] = null;
+	    socket[kSocketUsed] = true;
 
 	    if (socket[kWriting]) {
 	      assert(client[kRunning] === 0);
@@ -9285,6 +9342,9 @@ function requireClientH1 () {
 	  socket[kWriting] = false;
 	  socket[kReset] = false;
 	  socket[kBlocking] = false;
+	  socket[kIdleSocketValidation] = 0;
+	  socket[kIdleSocketValidationTimeout] = null;
+	  socket[kSocketUsed] = false;
 	  socket[kParser] = new Parser(client, socket, llhttpInstance);
 
 	  addListener(socket, 'error', function (err) {
@@ -9295,8 +9355,11 @@ function requireClientH1 () {
 	    // On Mac OS, we get an ECONNRESET even if there is a full body to be forwarded
 	    // to the user.
 	    if (err.code === 'ECONNRESET' && parser.statusCode && !parser.shouldKeepAlive) {
-	      // We treat all incoming data so for as a valid response.
-	      parser.onMessageComplete();
+	      const parserErr = parser.finish();
+	      if (parserErr) {
+	        this[kError] = parserErr;
+	        this[kClient][kOnError](parserErr);
+	      }
 	      return
 	    }
 
@@ -9315,8 +9378,10 @@ function requireClientH1 () {
 	    const parser = this[kParser];
 
 	    if (parser.statusCode && !parser.shouldKeepAlive) {
-	      // We treat all incoming data so far as a valid response.
-	      parser.onMessageComplete();
+	      const parserErr = parser.finish();
+	      if (parserErr) {
+	        util.destroy(this, parserErr);
+	      }
 	      return
 	    }
 
@@ -9326,10 +9391,11 @@ function requireClientH1 () {
 	    const client = this[kClient];
 	    const parser = this[kParser];
 
+	    clearIdleSocketValidation(this);
+
 	    if (parser) {
 	      if (!this[kError] && parser.statusCode && !parser.shouldKeepAlive) {
-	        // We treat all incoming data so far as a valid response.
-	        parser.onMessageComplete();
+	        this[kError] = parser.finish() || this[kError];
 	      }
 
 	      this[kParser].destroy();
@@ -9392,7 +9458,7 @@ function requireClientH1 () {
 	      return socket.destroyed
 	    },
 	    busy (request) {
-	      if (socket[kWriting] || socket[kReset] || socket[kBlocking]) {
+	      if (socket[kWriting] || socket[kReset] || socket[kBlocking] || socket[kIdleSocketValidation] === 1) {
 	        return true
 	      }
 
@@ -9430,6 +9496,31 @@ function requireClientH1 () {
 	  }
 	}
 
+	function clearIdleSocketValidation (socket) {
+	  if (socket[kIdleSocketValidationTimeout]) {
+	    clearTimeout(socket[kIdleSocketValidationTimeout]);
+	    socket[kIdleSocketValidationTimeout] = null;
+	  }
+
+	  socket[kIdleSocketValidation] = 0;
+	}
+
+	function scheduleIdleSocketValidation (client, socket) {
+	  socket[kIdleSocketValidation] = 1;
+	  socket[kIdleSocketValidationTimeout] = setTimeout(() => {
+	    socket[kIdleSocketValidationTimeout] = null;
+	    socket[kIdleSocketValidation] = 2;
+
+	    if (client[kSocket] === socket && !socket.destroyed) {
+	      client[kResume]();
+	    }
+	  }, 0);
+	  socket[kIdleSocketValidationTimeout].unref?.();
+	}
+
+	/**
+	 * @param {import('./client.js')} client
+	 */
 	function resumeH1 (client) {
 	  const socket = client[kSocket];
 
@@ -9442,6 +9533,32 @@ function requireClientH1 () {
 	    } else if (socket[kNoRef] && socket.ref) {
 	      socket.ref();
 	      socket[kNoRef] = false;
+	    }
+
+	    if (client[kRunning] === 0 && client[kPending] > 0 && socket[kSocketUsed]) {
+	      if (socket[kIdleSocketValidation] === 0) {
+	        scheduleIdleSocketValidation(client, socket);
+	        socket[kParser].readMore();
+	        if (socket.destroyed) {
+	          return
+	        }
+	        return
+	      }
+
+	      if (socket[kIdleSocketValidation] === 1) {
+	        socket[kParser].readMore();
+	        if (socket.destroyed) {
+	          return
+	        }
+	        return
+	      }
+	    }
+
+	    if (client[kRunning] === 0) {
+	      socket[kParser].readMore();
+	      if (socket.destroyed) {
+	        return
+	      }
 	    }
 
 	    if (client[kSize] === 0) {
@@ -9537,6 +9654,7 @@ function requireClientH1 () {
 	  }
 
 	  const socket = client[kSocket];
+	  clearIdleSocketValidation(socket);
 
 	  const abort = (err) => {
 	    if (request.aborted || request.completed) {
@@ -12356,7 +12474,6 @@ function requireAgent () {
 
 	class Agent extends DispatcherBase {
 	  constructor ({ factory = defaultFactory, maxRedirections = 0, connect, ...options } = {}) {
-
 	    if (typeof factory !== 'function') {
 	      throw new InvalidArgumentError('factory must be a function.')
 	    }
@@ -24020,32 +24137,25 @@ function requireParse$2 () {
 	    // If the attribute-name case-insensitively matches the string
 	    // "SameSite", the user agent MUST process the cookie-av as follows:
 
-	    // 1. Let enforcement be "Default".
-	    let enforcement = 'Default';
-
 	    const attributeValueLowercase = attributeValue.toLowerCase();
-	    // 2. If cookie-av's attribute-value is a case-insensitive match for
-	    //    "None", set enforcement to "None".
-	    if (attributeValueLowercase.includes('none')) {
-	      enforcement = 'None';
-	    }
 
-	    // 3. If cookie-av's attribute-value is a case-insensitive match for
-	    //    "Strict", set enforcement to "Strict".
-	    if (attributeValueLowercase.includes('strict')) {
-	      enforcement = 'Strict';
+	    // 1. If cookie-av's attribute-value is a case-insensitive match for
+	    //    "None", append an attribute to the cookie-attribute-list with an
+	    //    attribute-name of "SameSite" and an attribute-value of "None".
+	    if (attributeValueLowercase === 'none') {
+	      cookieAttributeList.sameSite = 'None';
+	    } else if (attributeValueLowercase === 'strict') {
+	      // 2. If cookie-av's attribute-value is a case-insensitive match for
+	      //    "Strict", append an attribute to the cookie-attribute-list with
+	      //    an attribute-name of "SameSite" and an attribute-value of
+	      //    "Strict".
+	      cookieAttributeList.sameSite = 'Strict';
+	    } else if (attributeValueLowercase === 'lax') {
+	      // 3. If cookie-av's attribute-value is a case-insensitive match for
+	      //    "Lax", append an attribute to the cookie-attribute-list with an
+	      //    attribute-name of "SameSite" and an attribute-value of "Lax".
+	      cookieAttributeList.sameSite = 'Lax';
 	    }
-
-	    // 4. If cookie-av's attribute-value is a case-insensitive match for
-	    //    "Lax", set enforcement to "Lax".
-	    if (attributeValueLowercase.includes('lax')) {
-	      enforcement = 'Lax';
-	    }
-
-	    // 5. Append an attribute to the cookie-attribute-list with an
-	    //    attribute-name of "SameSite" and an attribute-value of
-	    //    enforcement.
-	    cookieAttributeList.sameSite = enforcement;
 	  } else {
 	    cookieAttributeList.unparsed ??= [];
 
@@ -25631,6 +25741,11 @@ function requireReceiver () {
 	const { PerMessageDeflate } = requirePermessageDeflate();
 	const { MessageSizeExceededError } = requireErrors();
 
+	function failWebsocketConnectionWithCode (ws, code, reason) {
+	  closeWebSocketConnection(ws, code, reason, Buffer.byteLength(reason));
+	  failWebsocketConnection(ws, reason);
+	}
+
 	// This code was influenced by ws released under the MIT license.
 	// Copyright (c) 2011 Einar Otto Stangvik <einaros@gmail.com>
 	// Copyright (c) 2013 Arnout Kazemier and contributors
@@ -25651,18 +25766,22 @@ function requireReceiver () {
 	  #extensions
 
 	  /** @type {number} */
+	  #maxFragments
+
+	  /** @type {number} */
 	  #maxPayloadSize
 
 	  /**
 	   * @param {import('./websocket').WebSocket} ws
 	   * @param {Map<string, string>|null} extensions
-	   * @param {{ maxPayloadSize?: number }} [options]
+	   * @param {{ maxFragments?: number, maxPayloadSize?: number }} [options]
 	   */
 	  constructor (ws, extensions, options = {}) {
 	    super();
 
 	    this.ws = ws;
 	    this.#extensions = extensions == null ? new Map() : extensions;
+	    this.#maxFragments = options.maxFragments ?? 0;
 	    this.#maxPayloadSize = options.maxPayloadSize ?? 0;
 
 	    if (this.#extensions.has('permessage-deflate')) {
@@ -25686,9 +25805,9 @@ function requireReceiver () {
 	    if (
 	      this.#maxPayloadSize > 0 &&
 	      !isControlFrame(this.#info.opcode) &&
-	      this.#info.payloadLength > this.#maxPayloadSize
+	      this.#info.payloadLength + this.#fragmentsBytes > this.#maxPayloadSize
 	    ) {
-	      failWebsocketConnection(this.ws, 'Payload size exceeds maximum allowed size');
+	      failWebsocketConnectionWithCode(this.ws, 1009, 'Payload size exceeds maximum allowed size');
 	      return false
 	    }
 
@@ -25853,10 +25972,12 @@ function requireReceiver () {
 	          this.#state = parserStates.INFO;
 	        } else {
 	          if (!this.#info.compressed) {
-	            this.writeFragments(body);
+	            if (!this.writeFragments(body)) {
+	              return
+	            }
 
 	            if (this.#maxPayloadSize > 0 && this.#fragmentsBytes > this.#maxPayloadSize) {
-	              failWebsocketConnection(this.ws, new MessageSizeExceededError().message);
+	              failWebsocketConnectionWithCode(this.ws, 1009, new MessageSizeExceededError().message);
 	              return
 	            }
 
@@ -25875,14 +25996,17 @@ function requireReceiver () {
 	              this.#info.fin,
 	              (error, data) => {
 	                if (error) {
-	                  failWebsocketConnection(this.ws, error.message);
+	                  const code = error instanceof MessageSizeExceededError ? 1009 : 1007;
+	                  failWebsocketConnectionWithCode(this.ws, code, error.message);
 	                  return
 	                }
 
-	                this.writeFragments(data);
+	                if (!this.writeFragments(data)) {
+	                  return
+	                }
 
 	                if (this.#maxPayloadSize > 0 && this.#fragmentsBytes > this.#maxPayloadSize) {
-	                  failWebsocketConnection(this.ws, new MessageSizeExceededError().message);
+	                  failWebsocketConnectionWithCode(this.ws, 1009, new MessageSizeExceededError().message);
 	                  return
 	                }
 
@@ -25952,8 +26076,17 @@ function requireReceiver () {
 	  }
 
 	  writeFragments (fragment) {
+	    if (
+	      this.#maxFragments > 0 &&
+	      this.#fragments.length === this.#maxFragments
+	    ) {
+	      failWebsocketConnectionWithCode(this.ws, 1008, 'Too many message fragments');
+	      return false
+	    }
+
 	    this.#fragmentsBytes += fragment.length;
 	    this.#fragments.push(fragment);
+	    return true
 	  }
 
 	  consumeFragments () {
@@ -26656,9 +26789,12 @@ function requireWebsocket () {
 	    // once this happens, the connection is open
 	    this[kResponse] = response;
 
-	    const maxPayloadSize = this[kController]?.dispatcher?.webSocketOptions?.maxPayloadSize;
+	    const webSocketOptions = this[kController]?.dispatcher?.webSocketOptions;
+	    const maxFragments = webSocketOptions?.maxFragments;
+	    const maxPayloadSize = webSocketOptions?.maxPayloadSize;
 
 	    const parser = new ByteParser(this, parsedExtensions, {
+	      maxFragments,
 	      maxPayloadSize
 	    });
 	    parser.on('drain', onParserDrain);
@@ -29026,7 +29162,7 @@ function isKeyOperator(operator) {
 function getValues(context, operator, key, modifier) {
   var value = context[key], result = [];
   if (isDefined(value) && value !== "") {
-    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    if (typeof value === "string" || typeof value === "number" || typeof value === "bigint" || typeof value === "boolean") {
       value = value.toString();
       if (modifier && modifier !== "*") {
         value = value.substring(0, parseInt(modifier, 10));
@@ -29212,185 +29348,392 @@ function withDefaults$2(oldDefaults, newDefaults) {
 // pkg/dist-src/index.js
 var endpoint = withDefaults$2(null, DEFAULTS);
 
-var fastContentTypeParse = {};
+var dist = {};
 
-var hasRequiredFastContentTypeParse;
+var hasRequiredDist;
 
-function requireFastContentTypeParse () {
-	if (hasRequiredFastContentTypeParse) return fastContentTypeParse;
-	hasRequiredFastContentTypeParse = 1;
-
-	const NullObject = function NullObject () { };
-	NullObject.prototype = Object.create(null);
-
-	/**
-	 * RegExp to match *( ";" parameter ) in RFC 7231 sec 3.1.1.1
-	 *
-	 * parameter     = token "=" ( token / quoted-string )
-	 * token         = 1*tchar
-	 * tchar         = "!" / "#" / "$" / "%" / "&" / "'" / "*"
-	 *               / "+" / "-" / "." / "^" / "_" / "`" / "|" / "~"
-	 *               / DIGIT / ALPHA
-	 *               ; any VCHAR, except delimiters
-	 * quoted-string = DQUOTE *( qdtext / quoted-pair ) DQUOTE
-	 * qdtext        = HTAB / SP / %x21 / %x23-5B / %x5D-7E / obs-text
-	 * obs-text      = %x80-FF
-	 * quoted-pair   = "\" ( HTAB / SP / VCHAR / obs-text )
+function requireDist () {
+	if (hasRequiredDist) return dist;
+	hasRequiredDist = 1;
+	/*!
+	 * content-type
+	 * Copyright(c) 2015 Douglas Christopher Wilson
+	 * MIT Licensed
 	 */
-	const paramRE = /; *([!#$%&'*+.^\w`|~-]+)=("(?:[\v\u0020\u0021\u0023-\u005b\u005d-\u007e\u0080-\u00ff]|\\[\v\u0020-\u00ff])*"|[!#$%&'*+.^\w`|~-]+) */gu;
-
+	Object.defineProperty(dist, "__esModule", { value: true });
+	dist.format = format;
+	dist.parse = parse;
+	const TEXT_REGEXP = /^[\u0009\u0020-\u007e\u0080-\u00ff]*$/;
+	const TOKEN_REGEXP = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
 	/**
-	 * RegExp to match quoted-pair in RFC 7230 sec 3.2.6
-	 *
-	 * quoted-pair = "\" ( HTAB / SP / VCHAR / obs-text )
-	 * obs-text    = %x80-FF
+	 * RegExp to match chars that must be quoted-pair in RFC 9110 sec 5.6.4
 	 */
-	const quotedPairRE = /\\([\v\u0020-\u00ff])/gu;
-
+	const QUOTE_REGEXP = /[\\"]/g;
 	/**
-	 * RegExp to match type in RFC 7231 sec 3.1.1.1
+	 * RegExp to match type in RFC 9110 sec 8.3.1
 	 *
 	 * media-type = type "/" subtype
 	 * type       = token
 	 * subtype    = token
 	 */
-	const mediaTypeRE = /^[!#$%&'*+.^\w|~-]+\/[!#$%&'*+.^\w|~-]+$/u;
-
-	// default ContentType to prevent repeated object creation
-	const defaultContentType = { type: '', parameters: new NullObject() };
-	Object.freeze(defaultContentType.parameters);
-	Object.freeze(defaultContentType);
-
+	const TYPE_REGEXP = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+\/[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
 	/**
-	 * Parse media type to object.
-	 *
-	 * @param {string|object} header
-	 * @return {Object}
-	 * @public
+	 * Null object perf optimization. Faster than `Object.create(null)` and `{ __proto__: null }`.
 	 */
-
-	function parse (header) {
-	  if (typeof header !== 'string') {
-	    throw new TypeError('argument header is required and must be a string')
-	  }
-
-	  let index = header.indexOf(';');
-	  const type = index !== -1
-	    ? header.slice(0, index).trim()
-	    : header.trim();
-
-	  if (mediaTypeRE.test(type) === false) {
-	    throw new TypeError('invalid media type')
-	  }
-
-	  const result = {
-	    type: type.toLowerCase(),
-	    parameters: new NullObject()
-	  };
-
-	  // parse parameters
-	  if (index === -1) {
-	    return result
-	  }
-
-	  let key;
-	  let match;
-	  let value;
-
-	  paramRE.lastIndex = index;
-
-	  while ((match = paramRE.exec(header))) {
-	    if (match.index !== index) {
-	      throw new TypeError('invalid parameter format')
+	const NullObject = /* @__PURE__ */ (() => {
+	    const C = function () { };
+	    C.prototype = Object.create(null);
+	    return C;
+	})();
+	/**
+	 * Format an object into a `Content-Type` header.
+	 */
+	function format(obj) {
+	    const { type, parameters } = obj;
+	    if (!type || !TYPE_REGEXP.test(type)) {
+	        throw new TypeError(`Invalid type: ${type}`);
 	    }
-
-	    index += match[0].length;
-	    key = match[1].toLowerCase();
-	    value = match[2];
-
-	    if (value[0] === '"') {
-	      // remove quotes and escapes
-	      value = value
-	        .slice(1, value.length - 1);
-
-	      quotedPairRE.test(value) && (value = value.replace(quotedPairRE, '$1'));
+	    let result = type;
+	    if (parameters) {
+	        for (const param of Object.keys(parameters)) {
+	            if (!TOKEN_REGEXP.test(param)) {
+	                throw new TypeError(`Invalid parameter name: ${param}`);
+	            }
+	            result += `; ${param}=${qstring(parameters[param])}`;
+	        }
 	    }
-
-	    result.parameters[key] = value;
-	  }
-
-	  if (index !== header.length) {
-	    throw new TypeError('invalid parameter format')
-	  }
-
-	  return result
+	    return result;
 	}
-
-	function safeParse (header) {
-	  if (typeof header !== 'string') {
-	    return defaultContentType
-	  }
-
-	  let index = header.indexOf(';');
-	  const type = index !== -1
-	    ? header.slice(0, index).trim()
-	    : header.trim();
-
-	  if (mediaTypeRE.test(type) === false) {
-	    return defaultContentType
-	  }
-
-	  const result = {
-	    type: type.toLowerCase(),
-	    parameters: new NullObject()
-	  };
-
-	  // parse parameters
-	  if (index === -1) {
-	    return result
-	  }
-
-	  let key;
-	  let match;
-	  let value;
-
-	  paramRE.lastIndex = index;
-
-	  while ((match = paramRE.exec(header))) {
-	    if (match.index !== index) {
-	      return defaultContentType
-	    }
-
-	    index += match[0].length;
-	    key = match[1].toLowerCase();
-	    value = match[2];
-
-	    if (value[0] === '"') {
-	      // remove quotes and escapes
-	      value = value
-	        .slice(1, value.length - 1);
-
-	      quotedPairRE.test(value) && (value = value.replace(quotedPairRE, '$1'));
-	    }
-
-	    result.parameters[key] = value;
-	  }
-
-	  if (index !== header.length) {
-	    return defaultContentType
-	  }
-
-	  return result
+	/**
+	 * Parse a `Content-Type` header.
+	 */
+	function parse(header, options) {
+	    const len = header.length;
+	    let index = skipOWS(header, 0, len);
+	    const valueStart = index;
+	    index = skipValue(header, index, len);
+	    const valueEnd = trailingOWS(header, valueStart, index);
+	    const type = header.slice(valueStart, valueEnd).toLowerCase();
+	    const parameters = options?.parameters === false
+	        ? new NullObject()
+	        : parseParameters(header, index, len);
+	    return { type, parameters };
 	}
-
-	fastContentTypeParse.default = { parse, safeParse };
-	fastContentTypeParse.parse = parse;
-	fastContentTypeParse.safeParse = safeParse;
-	fastContentTypeParse.defaultContentType = defaultContentType;
-	return fastContentTypeParse;
+	const SP = 32; // " "
+	const HTAB = 9; // "\t"
+	const SEMI = 59; // ";"
+	const EQ = 61; // "="
+	const DQUOTE = 34; // '"'
+	const BSLASH = 92; // "\\"
+	/**
+	 * Parses the parameters of a `Content-Type` header starting at the given index.
+	 */
+	function parseParameters(header, index, len) {
+	    const parameters = new NullObject();
+	    parameter: while (index < len) {
+	        index = skipOWS(header, index + 1 /* Skip over ; */, len);
+	        const keyStart = index;
+	        while (index < len) {
+	            const code = header.charCodeAt(index);
+	            if (code === SEMI)
+	                continue parameter;
+	            if (code === EQ) {
+	                const keyEnd = trailingOWS(header, keyStart, index);
+	                const key = header.slice(keyStart, keyEnd).toLowerCase();
+	                index = skipOWS(header, index + 1, len);
+	                if (index < len && header.charCodeAt(index) === DQUOTE) {
+	                    index++;
+	                    let value = "";
+	                    while (index < len) {
+	                        const code = header.charCodeAt(index++);
+	                        if (code === DQUOTE) {
+	                            index = skipValue(header, index, len);
+	                            if (parameters[key] === undefined)
+	                                parameters[key] = value;
+	                            break;
+	                        }
+	                        if (code === BSLASH && index < len) {
+	                            value += header[index++];
+	                            continue;
+	                        }
+	                        value += String.fromCharCode(code);
+	                    }
+	                    continue parameter;
+	                }
+	                const valueStart = index;
+	                index = skipValue(header, index, len);
+	                if (parameters[key] === undefined) {
+	                    const valueEnd = trailingOWS(header, valueStart, index);
+	                    parameters[key] = header.slice(valueStart, valueEnd);
+	                }
+	                continue parameter;
+	            }
+	            index++;
+	        }
+	    }
+	    return parameters;
+	}
+	/**
+	 * Skip over characters until a semicolon.
+	 */
+	function skipValue(str, index, len) {
+	    while (index < len) {
+	        const char = str.charCodeAt(index);
+	        if (char === SEMI)
+	            break;
+	        index++;
+	    }
+	    return index;
+	}
+	/**
+	 * Skip optional whitespace (OWS) in an HTTP header value.
+	 *
+	 * OWS is defined in RFC 9110 sec 5.6.3 as SP (" ") or HTAB ("\t").
+	 */
+	function skipOWS(header, index, len) {
+	    while (index < len) {
+	        const char = header.charCodeAt(index);
+	        if (char !== SP && char !== HTAB)
+	            break;
+	        index++;
+	    }
+	    return index;
+	}
+	/**
+	 * Trim optional whitespace (OWS) from the end of a substring.
+	 *
+	 * OWS is defined in RFC 9110 sec 5.6.3 as SP (" ") or HTAB ("\t").
+	 */
+	function trailingOWS(header, start, end) {
+	    while (end > start) {
+	        const char = header.charCodeAt(end - 1);
+	        if (char !== SP && char !== HTAB)
+	            break;
+	        end--;
+	    }
+	    return end;
+	}
+	/**
+	 * Serialize a parameter value.
+	 */
+	function qstring(str) {
+	    if (TOKEN_REGEXP.test(str))
+	        return str;
+	    if (TEXT_REGEXP.test(str))
+	        return `"${str.replace(QUOTE_REGEXP, "\\$&")}"`;
+	    throw new TypeError(`Invalid parameter value: ${str}`);
+	}
+	
+	return dist;
 }
 
-var fastContentTypeParseExports = requireFastContentTypeParse();
+var distExports = requireDist();
+
+const intRegex = /^-?\d+$/;
+const noiseValue = /^-?\d+n+$/; // Noise - strings that match the custom format before being converted to it
+const originalStringify = JSON.stringify;
+const originalParse = JSON.parse;
+const customFormat = /^-?\d+n$/;
+
+const bigIntsStringify = /([\[:])?"(-?\d+)n"($|([\\n]|\s)*(\s|[\\n])*[,\}\]])/g;
+const noiseStringify =
+  /([\[:])?("-?\d+n+)n("$|"([\\n]|\s)*(\s|[\\n])*[,\}\]])/g;
+
+/**
+ * @typedef {(this: any, key: string | number | undefined, value: any) => any} Replacer
+ * @typedef {(key: string | number | undefined, value: any, context?: { source: string }) => any} Reviver
+ */
+
+/**
+ * Converts a JavaScript value to a JSON string.
+ *
+ * Supports serialization of BigInt values using two strategies:
+ * 1. Custom format "123n" → "123" (universal fallback)
+ * 2. Native JSON.rawJSON() (Node.js 22+, fastest) when available
+ *
+ * All other values are serialized exactly like native JSON.stringify().
+ *
+ * @param {*} value The value to convert to a JSON string.
+ * @param {Replacer | Array<string | number> | null} [replacer]
+ *   A function that alters the behavior of the stringification process,
+ *   or an array of strings/numbers to indicate properties to exclude.
+ * @param {string | number} [space]
+ *   A string or number to specify indentation or pretty-printing.
+ * @returns {string} The JSON string representation.
+ */
+const JSONStringify = (value, replacer, space) => {
+  if ("rawJSON" in JSON) {
+    return originalStringify(
+      value,
+      (key, value) => {
+        if (typeof value === "bigint") return JSON.rawJSON(value.toString());
+
+        if (Array.isArray(replacer) && replacer.includes(key)) return value;
+
+        return value;
+      },
+      space,
+    );
+  }
+
+  if (!value) return originalStringify(value, replacer, space);
+
+  const convertedToCustomJSON = originalStringify(
+    value,
+    (key, value) => {
+      const isNoise = typeof value === "string" && noiseValue.test(value);
+
+      if (isNoise) return value.toString() + "n"; // Mark noise values with additional "n" to offset the deletion of one "n" during the processing
+
+      if (typeof value === "bigint") return value.toString() + "n";
+
+      if (Array.isArray(replacer) && replacer.includes(key)) return value;
+
+      return value;
+    },
+    space,
+  );
+  const processedJSON = convertedToCustomJSON.replace(
+    bigIntsStringify,
+    "$1$2$3",
+  ); // Delete one "n" off the end of every BigInt value
+  const denoisedJSON = processedJSON.replace(noiseStringify, "$1$2$3"); // Remove one "n" off the end of every noisy string
+
+  return denoisedJSON;
+};
+
+const featureCache = new Map();
+
+/**
+ * Detects if the current JSON.parse implementation supports the context.source feature.
+ *
+ * Uses toString() fingerprinting to cache results and automatically detect runtime
+ * replacements of JSON.parse (polyfills, mocks, etc.).
+ *
+ * @returns {boolean} true if context.source is supported, false otherwise.
+ */
+const isContextSourceSupported = () => {
+  const parseFingerprint = JSON.parse.toString();
+
+  if (featureCache.has(parseFingerprint)) {
+    return featureCache.get(parseFingerprint);
+  }
+
+  try {
+    const result = JSON.parse(
+      "1",
+      (_, __, context) => !!context?.source && context.source === "1",
+    );
+    featureCache.set(parseFingerprint, result);
+
+    return result;
+  } catch {
+    featureCache.set(parseFingerprint, false);
+
+    return false;
+  }
+};
+
+/**
+ * Reviver function that converts custom-format BigInt strings back to BigInt values.
+ * Also handles "noise" strings that accidentally match the BigInt format.
+ *
+ * @param {string | number | undefined} key The object key.
+ * @param {*} value The value being parsed.
+ * @param {object} [context] Parse context (if supported by JSON.parse).
+ * @param {Reviver} [userReviver] User's custom reviver function.
+ * @returns {any} The transformed value.
+ */
+const convertMarkedBigIntsReviver = (key, value, context, userReviver) => {
+  const isCustomFormatBigInt =
+    typeof value === "string" && customFormat.test(value);
+  if (isCustomFormatBigInt) return BigInt(value.slice(0, -1));
+
+  const isNoiseValue = typeof value === "string" && noiseValue.test(value);
+  if (isNoiseValue) return value.slice(0, -1);
+
+  return value;
+};
+
+/**
+ * Fast JSON.parse implementation (~2x faster than classic fallback).
+ * Uses JSON.parse's context.source feature to detect integers and convert
+ * large numbers directly to BigInt without string manipulation.
+ *
+ * Does not support legacy custom format from v1 of this library.
+ *
+ * @param {string} text JSON string to parse.
+ * @param {Reviver} [reviver] Transform function to apply to each value.
+ * @returns {any} Parsed JavaScript value.
+ */
+const JSONParseV2 = (text, reviver) => {
+  return JSON.parse(text, (key, value, context) => {
+    const isBigNumber =
+      typeof value === "number" &&
+      (value > Number.MAX_SAFE_INTEGER || value < Number.MIN_SAFE_INTEGER);
+    const isInt = context && intRegex.test(context.source);
+    const isBigInt = isBigNumber && isInt;
+
+    if (isBigInt) return BigInt(context.source);
+
+    return value;
+  });
+};
+
+const MAX_INT = Number.MAX_SAFE_INTEGER.toString();
+const MAX_DIGITS = MAX_INT.length;
+const stringsOrLargeNumbers =
+  /"(?:\\.|[^"])*"|-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?/g;
+const noiseValueWithQuotes = /^"-?\d+n+"$/; // Noise - strings that match the custom format before being converted to it
+
+/**
+ * Converts a JSON string into a JavaScript value.
+ *
+ * Supports parsing of large integers using two strategies:
+ * 1. Classic fallback: Marks large numbers with "123n" format, then converts to BigInt
+ * 2. Fast path (JSONParseV2): Uses context.source feature (~2x faster) when available
+ *
+ * All other JSON values are parsed exactly like native JSON.parse().
+ *
+ * @param {string} text A valid JSON string.
+ * @param {Reviver} [reviver]
+ *   A function that transforms the results. This function is called for each member
+ *   of the object. If a member contains nested objects, the nested objects are
+ *   transformed before the parent object is.
+ * @returns {any} The parsed JavaScript value.
+ * @throws {SyntaxError} If text is not valid JSON.
+ */
+const JSONParse = (text, reviver) => {
+  if (!text) return originalParse(text, reviver);
+
+  if (isContextSourceSupported()) return JSONParseV2(text); // Shortcut to a faster (2x) and simpler version
+
+  // Find and mark big numbers with "n"
+  const serializedData = text.replace(
+    stringsOrLargeNumbers,
+    (text, digits, fractional, exponential) => {
+      const isString = text[0] === '"';
+      const isNoise = isString && noiseValueWithQuotes.test(text);
+
+      if (isNoise) return text.substring(0, text.length - 1) + 'n"'; // Mark noise values with additional "n" to offset the deletion of one "n" during the processing
+
+      const isFractionalOrExponential = fractional || exponential;
+      const isLessThanMaxSafeInt =
+        digits &&
+        (digits.length < MAX_DIGITS ||
+          (digits.length === MAX_DIGITS && digits <= MAX_INT)); // With a fixed number of digits, we can correctly use lexicographical comparison to do a numeric comparison
+
+      if (isString || isFractionalOrExponential || isLessThanMaxSafeInt)
+        return text;
+
+      return '"' + text + 'n"';
+    },
+  );
+
+  return originalParse(serializedData, (key, value, context) =>
+    convertMarkedBigIntsReviver(key, value),
+  );
+};
 
 class RequestError extends Error {
   name;
@@ -29434,7 +29777,7 @@ class RequestError extends Error {
 // pkg/dist-src/index.js
 
 // pkg/dist-src/version.js
-var VERSION$4 = "10.0.7";
+var VERSION$4 = "10.0.10";
 
 // pkg/dist-src/defaults.js
 var defaults_default = {
@@ -29462,7 +29805,7 @@ async function fetchWrapper(requestOptions) {
   }
   const log = requestOptions.request?.log || console;
   const parseSuccessResponseBody = requestOptions.request?.parseSuccessResponseBody !== false;
-  const body = isPlainObject(requestOptions.body) || Array.isArray(requestOptions.body) ? JSON.stringify(requestOptions.body) : requestOptions.body;
+  const body = isPlainObject(requestOptions.body) || Array.isArray(requestOptions.body) ? JSONStringify(requestOptions.body) : requestOptions.body;
   const requestHeaders = Object.fromEntries(
     Object.entries(requestOptions.headers).map(([name, value]) => [
       name,
@@ -29556,12 +29899,12 @@ async function getResponseData(response) {
   if (!contentType) {
     return response.text().catch(noop$1);
   }
-  const mimetype = fastContentTypeParseExports.safeParse(contentType);
+  const mimetype = distExports.parse(contentType);
   if (isJSONResponse(mimetype)) {
     let text = "";
     try {
       text = await response.text();
-      return JSON.parse(text);
+      return JSONParse(text);
     } catch (err) {
       return text;
     }
@@ -34464,6 +34807,8 @@ function requireConstants () {
 	const WIN_SLASH = '\\\\/';
 	const WIN_NO_SLASH = `[^${WIN_SLASH}]`;
 
+	const DEFAULT_MAX_EXTGLOB_RECURSION = 0;
+
 	/**
 	 * Posix glob regex
 	 */
@@ -34527,6 +34872,7 @@ function requireConstants () {
 	 */
 
 	const POSIX_REGEX_SOURCE = {
+	  __proto__: null,
 	  alnum: 'a-zA-Z0-9',
 	  alpha: 'a-zA-Z',
 	  ascii: '\\x00-\\x7F',
@@ -34544,6 +34890,7 @@ function requireConstants () {
 	};
 
 	constants = {
+	  DEFAULT_MAX_EXTGLOB_RECURSION,
 	  MAX_LENGTH: 1024 * 64,
 	  POSIX_REGEX_SOURCE,
 
@@ -34557,6 +34904,7 @@ function requireConstants () {
 
 	  // Replace globs with equivalent patterns to reduce parsing time.
 	  REPLACEMENTS: {
+	    __proto__: null,
 	    '***': '*',
 	    '**/**': '**',
 	    '**/**/**': '**'
@@ -35164,6 +35512,277 @@ function requireParse () {
 	  return `Missing ${type}: "${char}" - use "\\\\${char}" to match literal characters`;
 	};
 
+	const splitTopLevel = input => {
+	  const parts = [];
+	  let bracket = 0;
+	  let paren = 0;
+	  let quote = 0;
+	  let value = '';
+	  let escaped = false;
+
+	  for (const ch of input) {
+	    if (escaped === true) {
+	      value += ch;
+	      escaped = false;
+	      continue;
+	    }
+
+	    if (ch === '\\') {
+	      value += ch;
+	      escaped = true;
+	      continue;
+	    }
+
+	    if (ch === '"') {
+	      quote = quote === 1 ? 0 : 1;
+	      value += ch;
+	      continue;
+	    }
+
+	    if (quote === 0) {
+	      if (ch === '[') {
+	        bracket++;
+	      } else if (ch === ']' && bracket > 0) {
+	        bracket--;
+	      } else if (bracket === 0) {
+	        if (ch === '(') {
+	          paren++;
+	        } else if (ch === ')' && paren > 0) {
+	          paren--;
+	        } else if (ch === '|' && paren === 0) {
+	          parts.push(value);
+	          value = '';
+	          continue;
+	        }
+	      }
+	    }
+
+	    value += ch;
+	  }
+
+	  parts.push(value);
+	  return parts;
+	};
+
+	const isPlainBranch = branch => {
+	  let escaped = false;
+
+	  for (const ch of branch) {
+	    if (escaped === true) {
+	      escaped = false;
+	      continue;
+	    }
+
+	    if (ch === '\\') {
+	      escaped = true;
+	      continue;
+	    }
+
+	    if (/[?*+@!()[\]{}]/.test(ch)) {
+	      return false;
+	    }
+	  }
+
+	  return true;
+	};
+
+	const normalizeSimpleBranch = branch => {
+	  let value = branch.trim();
+	  let changed = true;
+
+	  while (changed === true) {
+	    changed = false;
+
+	    if (/^@\([^\\()[\]{}|]+\)$/.test(value)) {
+	      value = value.slice(2, -1);
+	      changed = true;
+	    }
+	  }
+
+	  if (!isPlainBranch(value)) {
+	    return;
+	  }
+
+	  return value.replace(/\\(.)/g, '$1');
+	};
+
+	const hasRepeatedCharPrefixOverlap = branches => {
+	  const values = branches.map(normalizeSimpleBranch).filter(Boolean);
+
+	  for (let i = 0; i < values.length; i++) {
+	    for (let j = i + 1; j < values.length; j++) {
+	      const a = values[i];
+	      const b = values[j];
+	      const char = a[0];
+
+	      if (!char || a !== char.repeat(a.length) || b !== char.repeat(b.length)) {
+	        continue;
+	      }
+
+	      if (a === b || a.startsWith(b) || b.startsWith(a)) {
+	        return true;
+	      }
+	    }
+	  }
+
+	  return false;
+	};
+
+	const parseRepeatedExtglob = (pattern, requireEnd = true) => {
+	  if ((pattern[0] !== '+' && pattern[0] !== '*') || pattern[1] !== '(') {
+	    return;
+	  }
+
+	  let bracket = 0;
+	  let paren = 0;
+	  let quote = 0;
+	  let escaped = false;
+
+	  for (let i = 1; i < pattern.length; i++) {
+	    const ch = pattern[i];
+
+	    if (escaped === true) {
+	      escaped = false;
+	      continue;
+	    }
+
+	    if (ch === '\\') {
+	      escaped = true;
+	      continue;
+	    }
+
+	    if (ch === '"') {
+	      quote = quote === 1 ? 0 : 1;
+	      continue;
+	    }
+
+	    if (quote === 1) {
+	      continue;
+	    }
+
+	    if (ch === '[') {
+	      bracket++;
+	      continue;
+	    }
+
+	    if (ch === ']' && bracket > 0) {
+	      bracket--;
+	      continue;
+	    }
+
+	    if (bracket > 0) {
+	      continue;
+	    }
+
+	    if (ch === '(') {
+	      paren++;
+	      continue;
+	    }
+
+	    if (ch === ')') {
+	      paren--;
+
+	      if (paren === 0) {
+	        if (requireEnd === true && i !== pattern.length - 1) {
+	          return;
+	        }
+
+	        return {
+	          type: pattern[0],
+	          body: pattern.slice(2, i),
+	          end: i
+	        };
+	      }
+	    }
+	  }
+	};
+
+	const getStarExtglobSequenceOutput = pattern => {
+	  let index = 0;
+	  const chars = [];
+
+	  while (index < pattern.length) {
+	    const match = parseRepeatedExtglob(pattern.slice(index), false);
+
+	    if (!match || match.type !== '*') {
+	      return;
+	    }
+
+	    const branches = splitTopLevel(match.body).map(branch => branch.trim());
+	    if (branches.length !== 1) {
+	      return;
+	    }
+
+	    const branch = normalizeSimpleBranch(branches[0]);
+	    if (!branch || branch.length !== 1) {
+	      return;
+	    }
+
+	    chars.push(branch);
+	    index += match.end + 1;
+	  }
+
+	  if (chars.length < 1) {
+	    return;
+	  }
+
+	  const source = chars.length === 1
+	    ? utils.escapeRegex(chars[0])
+	    : `[${chars.map(ch => utils.escapeRegex(ch)).join('')}]`;
+
+	  return `${source}*`;
+	};
+
+	const repeatedExtglobRecursion = pattern => {
+	  let depth = 0;
+	  let value = pattern.trim();
+	  let match = parseRepeatedExtglob(value);
+
+	  while (match) {
+	    depth++;
+	    value = match.body.trim();
+	    match = parseRepeatedExtglob(value);
+	  }
+
+	  return depth;
+	};
+
+	const analyzeRepeatedExtglob = (body, options) => {
+	  if (options.maxExtglobRecursion === false) {
+	    return { risky: false };
+	  }
+
+	  const max =
+	    typeof options.maxExtglobRecursion === 'number'
+	      ? options.maxExtglobRecursion
+	      : constants.DEFAULT_MAX_EXTGLOB_RECURSION;
+
+	  const branches = splitTopLevel(body).map(branch => branch.trim());
+
+	  if (branches.length > 1) {
+	    if (
+	      branches.some(branch => branch === '') ||
+	      branches.some(branch => /^[*?]+$/.test(branch)) ||
+	      hasRepeatedCharPrefixOverlap(branches)
+	    ) {
+	      return { risky: true };
+	    }
+	  }
+
+	  for (const branch of branches) {
+	    const safeOutput = getStarExtglobSequenceOutput(branch);
+	    if (safeOutput) {
+	      return { risky: true, safeOutput };
+	    }
+
+	    if (repeatedExtglobRecursion(branch) > max) {
+	      return { risky: true };
+	    }
+	  }
+
+	  return { risky: false };
+	};
+
 	/**
 	 * Parse the given input string.
 	 * @param {String} input
@@ -35345,6 +35964,8 @@ function requireParse () {
 	    token.prev = prev;
 	    token.parens = state.parens;
 	    token.output = state.output;
+	    token.startIndex = state.index;
+	    token.tokensIndex = tokens.length;
 	    const output = (opts.capture ? '(' : '') + token.open;
 
 	    increment('parens');
@@ -35354,6 +35975,34 @@ function requireParse () {
 	  };
 
 	  const extglobClose = token => {
+	    const literal = input.slice(token.startIndex, state.index + 1);
+	    const body = input.slice(token.startIndex + 2, state.index);
+	    const analysis = analyzeRepeatedExtglob(body, opts);
+
+	    if ((token.type === 'plus' || token.type === 'star') && analysis.risky) {
+	      const safeOutput = analysis.safeOutput
+	        ? (token.output ? '' : ONE_CHAR) + (opts.capture ? `(${analysis.safeOutput})` : analysis.safeOutput)
+	        : undefined;
+	      const open = tokens[token.tokensIndex];
+
+	      open.type = 'text';
+	      open.value = literal;
+	      open.output = safeOutput || utils.escapeRegex(literal);
+
+	      for (let i = token.tokensIndex + 1; i < tokens.length; i++) {
+	        tokens[i].value = '';
+	        tokens[i].output = '';
+	        delete tokens[i].suffix;
+	      }
+
+	      state.output = token.output + open.output;
+	      state.backtrack = true;
+
+	      push({ type: 'paren', extglob: true, value, output: '' });
+	      decrement('parens');
+	      return;
+	    }
+
 	    let output = token.close + (opts.capture ? ')' : '');
 	    let rest;
 
