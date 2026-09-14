@@ -1,13 +1,9 @@
 {
-  extends: [
-    "local>bjw-s/renovate-config"
-  ],
+  extends: ['local>bjw-s/renovate-config'],
   packageRules: [
     {
-      "matchDatasources": [
-        "npm"
-      ],
-      "minimumReleaseAge": "3 days"
+      matchDatasources: ['npm'],
+      minimumReleaseAge: '3 days'
     },
     {
       description: 'Group devDependencies',

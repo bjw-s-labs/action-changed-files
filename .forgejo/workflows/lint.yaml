@@ -18,9 +18,6 @@ concurrency:
   group: ${{ forgejo.ref }}-${{ forgejo.workflow }}
   cancel-in-progress: true
 
-permissions:
-  contents: read
-
 jobs:
   actionlint:
     name: actionlint
