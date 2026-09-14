@@ -9,9 +9,16 @@ on:
         description: Tag name (e.g. v1.0.0)
         required: true
         type: string
+  release:
+    types:
+      - published
 
 permissions:
   contents: write
+
+concurrency:
+  group: release-${{ github.event_name == 'release' && github.event.release.tag_name || inputs.tag }}
+  cancel-in-progress: false
 
 jobs:
   create-release:
@@ -20,12 +27,14 @@ jobs:
 
     steps:
       - name: Checkout
+        if: github.event_name == 'workflow_dispatch'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: main
           token: ${{ secrets.FORGEJO_TOKEN }}
 
-      - name: Create and push tag
+      - name: Create and push tag if needed
+        if: github.event_name == 'workflow_dispatch'
         env:
           TAG: ${{ inputs.tag }}
           CI_TAG_AUTHOR: lab-assistant
@@ -33,33 +42,110 @@ jobs:
         run: |-
           git config --local user.email "${{ env.CI_TAG_EMAIL }}"
           git config --local user.name "${{ env.CI_TAG_AUTHOR }}"
-          git tag "$TAG"
-          git push origin "$TAG"
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null; then
+            echo "Tag $TAG already exists; leaving it unchanged."
+          else
+            git tag "$TAG"
+            git push origin "$TAG"
+          fi
 
-      - name: Create Forgejo release
+      - name: Create Forgejo release if needed
+        if: github.event_name == 'workflow_dispatch'
         env:
           FORGEJO_TOKEN: ${{ secrets.FORGEJO_TOKEN }}
           TAG: ${{ inputs.tag }}
         run: |-
-          jq -n \
-            --arg tag_name "$TAG" \
-            '{tag_name: $tag_name, name: $tag_name}' \
-          | curl -sS -X POST \
-            "${{ github.server_url }}/api/v1/repos/${{ github.repository }}/releases" \
-            -H "Authorization: token $FORGEJO_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d @-
+          release_status="$(curl -sS -o forgejo-release.json -w '%{http_code}' \
+            "${{ github.server_url }}/api/v1/repos/${{ github.repository }}/releases/tags/$TAG" \
+            -H "Authorization: token $FORGEJO_TOKEN")" || release_status=000
 
-      - name: Create GitHub Release
+          case "$release_status" in
+            200)
+              echo "Forgejo release for $TAG already exists; leaving it unchanged."
+              ;;
+            404)
+              jq -n --arg tag_name "$TAG" '{tag_name: $tag_name, name: $tag_name}' \
+                | curl -fsS -X POST \
+                  "${{ github.server_url }}/api/v1/repos/${{ github.repository }}/releases" \
+                  -H "Authorization: token $FORGEJO_TOKEN" \
+                  -H "Content-Type: application/json" \
+                  -d @- > forgejo-release.json
+              ;;
+            *)
+              echo "Unable to look up the Forgejo release for $TAG (HTTP $release_status)." >&2
+              cat forgejo-release.json >&2 || true
+              exit 1
+              ;;
+          esac
+
+      - name: Mirror release to GitHub
         env:
+          FORGEJO_TOKEN: ${{ secrets.FORGEJO_TOKEN }}
           GH_TOKEN: ${{ secrets.gh_mirror_token }}
-          TAG: ${{ inputs.tag }}
         run: |-
+          if [ "${{ github.event_name }}" = "release" ]; then
+            cp "${{ github.event_path }}" forgejo-release.json
+          else
+            curl -fsS \
+              "${{ github.server_url }}/api/v1/repos/${{ github.repository }}/releases/tags/${{ inputs.tag }}" \
+              -H "Authorization: token $FORGEJO_TOKEN" \
+              -o forgejo-release.json
+          fi
+
+          TAG="$(jq -er '.release.tag_name // .tag_name' forgejo-release.json)"
+          NAME="$(jq -er '.release.name // .name // .release.tag_name // .tag_name' forgejo-release.json)"
+          BODY="$(jq -r '.release.body // .body // ""' forgejo-release.json)"
+          PRERELEASE="$(jq -r '.release.prerelease // .prerelease // false' forgejo-release.json)"
+          DRAFT="$(jq -r '.release.draft // .draft // false' forgejo-release.json)"
+
+          echo "Waiting for tag $TAG to arrive at GitHub."
+          for attempt in $(seq 1 30); do
+            if git ls-remote --exit-code --tags \
+              https://github.com/bjw-s-labs/action-changed-files.git "refs/tags/$TAG" >/dev/null; then
+              break
+            fi
+            if [ "$attempt" -eq 30 ]; then
+              echo "Tag $TAG did not arrive at GitHub within five minutes." >&2
+              exit 1
+            fi
+            sleep 10
+          done
+
           jq -n \
             --arg tag_name "$TAG" \
-            '{tag_name: $tag_name, name: $tag_name}' \
-          | curl -sS -X POST \
-            "https://api.github.com/repos/bjw-s-labs/action-changed-files/releases" \
+            --arg name "$NAME" \
+            --arg body "$BODY" \
+            --argjson prerelease "$PRERELEASE" \
+            --argjson draft "$DRAFT" \
+            '{tag_name: $tag_name, name: $name, body: $body, prerelease: $prerelease, draft: $draft}' \
+            > github-release.json
+
+          github_status="$(curl -sS -o github-existing-release.json -w '%{http_code}' \
+            "https://api.github.com/repos/bjw-s-labs/action-changed-files/releases/tags/$TAG" \
             -H "Authorization: Bearer $GH_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d @-
+            -H "Accept: application/vnd.github+json")" || github_status=000
+
+          case "$github_status" in
+            200)
+              release_id="$(jq -er '.id' github-existing-release.json)"
+              curl -fsS -X PATCH \
+                "https://api.github.com/repos/bjw-s-labs/action-changed-files/releases/$release_id" \
+                -H "Authorization: Bearer $GH_TOKEN" \
+                -H "Accept: application/vnd.github+json" \
+                -H "Content-Type: application/json" \
+                -d @github-release.json
+              ;;
+            404)
+              curl -fsS -X POST \
+                "https://api.github.com/repos/bjw-s-labs/action-changed-files/releases" \
+                -H "Authorization: Bearer $GH_TOKEN" \
+                -H "Accept: application/vnd.github+json" \
+                -H "Content-Type: application/json" \
+                -d @github-release.json
+              ;;
+            *)
+              echo "Unable to look up the GitHub release for $TAG (HTTP $github_status)." >&2
+              cat github-existing-release.json >&2 || true
+              exit 1
+              ;;
+          esac
