@@ -38,7 +38,7 @@ inputs:
 # Define your outputs here.
 outputs:
   changed_files:
-    description: JSON array of changed files
+    description: JSON array of changed files (always set; empty when no files are available)
 
 runs:
   using: node24

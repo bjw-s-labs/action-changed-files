@@ -37810,21 +37810,26 @@ async function getChangedFiles(octokit, includeDeletedFiles, includeOnlyDirector
  * @returns Resolves when the action is complete.
  */
 async function run() {
+    let changedFiles = [];
     try {
         const inputs = await getInputs();
         const octokit = getOctokit(inputs.githubToken, {
             baseUrl: process.env.GITHUB_API_URL
         });
-        const changedFiles = await getChangedFiles(octokit, inputs.includeDeletedFiles, inputs.includeOnlyDirectories, inputs.searchPath, inputs.maxDepth, inputs.patterns);
+        changedFiles = await getChangedFiles(octokit, inputs.includeDeletedFiles, inputs.includeOnlyDirectories, inputs.searchPath, inputs.maxDepth, inputs.patterns);
         console.log('Changes:');
         changedFiles.forEach((file) => console.log(`  - ${file}`));
-        setOutput('changed_files', JSON.stringify(changedFiles));
     }
     catch (error) {
         // Fail the workflow run if an error occurs
         if (error instanceof Error) {
             setFailed(error.message);
         }
+    }
+    finally {
+        // Always publish valid JSON. This lets consumers safely use fromJSON even
+        // when a runner continues after this action has failed.
+        setOutput('changed_files', JSON.stringify(changedFiles));
     }
 }
 

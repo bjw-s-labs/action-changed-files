@@ -50,7 +50,7 @@ describe('run', () => {
     // Check if no failure occurred
     expect(core.setFailed).toHaveBeenCalledWith(errorMessage)
 
-    // Check if output is not set
-    expect(core.setOutput).not.toHaveBeenCalled()
+    // The output remains valid JSON for consumers that continue after a failure.
+    expect(core.setOutput).toHaveBeenCalledWith('changed_files', '[]')
   })
 })

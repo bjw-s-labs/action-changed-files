@@ -10,13 +10,15 @@ import { getChangedFiles } from './changes-helper.js'
  * @returns Resolves when the action is complete.
  */
 export async function run(): Promise<void> {
+  let changedFiles: string[] = []
+
   try {
     const inputs = await inputHelper.getInputs()
     const octokit = github.getOctokit(inputs.githubToken, {
       baseUrl: process.env.GITHUB_API_URL
     })
 
-    const changedFiles = await getChangedFiles(
+    changedFiles = await getChangedFiles(
       octokit,
       inputs.includeDeletedFiles,
       inputs.includeOnlyDirectories,
@@ -27,12 +29,14 @@ export async function run(): Promise<void> {
 
     console.log('Changes:')
     changedFiles.forEach((file) => console.log(`  - ${file}`))
-
-    core.setOutput('changed_files', JSON.stringify(changedFiles))
   } catch (error) {
     // Fail the workflow run if an error occurs
     if (error instanceof Error) {
       core.setFailed(error.message)
     }
+  } finally {
+    // Always publish valid JSON. This lets consumers safely use fromJSON even
+    // when a runner continues after this action has failed.
+    core.setOutput('changed_files', JSON.stringify(changedFiles))
   }
 }
